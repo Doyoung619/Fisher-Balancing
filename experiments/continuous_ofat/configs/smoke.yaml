@@ -1,0 +1,156 @@
+project: FisherBalancing-continuous-OFAT
+source_file: FisherBalancing_source.tex
+families:
+- gaussian
+- bernoulli
+methods:
+- Ours
+- A-opt
+- D-opt
+- E-greedy
+- UCB
+- TS
+- Random
+conditions:
+- id: center
+  d: 10
+  L: 1.0
+  m: 10
+  kappa: 1.5
+- id: dim5
+  d: 5
+  L: 1.0
+  m: 10
+  kappa: 1.5
+- id: dim20
+  d: 20
+  L: 1.0
+  m: 10
+  kappa: 1.5
+- id: radius05
+  d: 10
+  L: 0.5
+  m: 10
+  kappa: 1.5
+- id: radius2
+  d: 10
+  L: 2.0
+  m: 10
+  kappa: 1.5
+- id: batch5
+  d: 10
+  L: 1.0
+  m: 5
+  kappa: 1.5
+- id: batch20
+  d: 10
+  L: 1.0
+  m: 20
+  kappa: 1.5
+master_seed: 20261005
+query_domain: closed_euclidean_ball
+parameter_radius: 4.0
+rho: 1.0
+warm_start: 0
+fixed_signal_strength: 1.5
+target_norm_rule: kappa / L
+query_reuse_within_batch: true
+query_reuse_across_batches: true
+feedback: after_entire_batch
+N_cal: 400
+N_run: 400
+temperature_exponent: 0.75
+temperature_rule: R * sqrt(m / (8 * log(d))) * (N / N_cal)**0.75
+temperature_R:
+  gaussian: L**2
+  bernoulli: L**2/4
+clip_temperature_after_calibration: false
+recalibrate_on_resume_or_extension: false
+replicates_noncentral: 1
+replicates_center: 1
+preview_replicates: 1
+preview_N: 40
+production_extensions_enabled: false
+precision: float64
+checkpoint_interval_seconds: 60
+status_interval_seconds: 30
+oracle_feasibility_tolerance: 1.0e-09
+oracle_audit_relative_score_tolerance: 1.0e-06
+estimator_normalized_kkt_tolerance: 1.0e-08
+e_relax_relative_tolerance: 0.0001
+e_relax_rounding: systematic_randomized
+e_relax_exchange_passes: 0
+reference_relative_gap_tolerance: 1.0e-07
+ucb_delta: 0.05
+compute_policy: profile_fastest_authorized_resources
+expected_family_condition_combinations: 14
+expected_family_condition_method_combinations: 98
+expected_logical_trajectories: 28672
+method_ids:
+  Ours: FB-range-anchored-continuous
+  A-opt: A-opt-exact-reduction
+  D-opt: D-opt-adaptive-Wynn-batched
+  E-greedy: E-greedy-exact-primary
+  UCB: UCB-ellipsoid-batched
+  TS: TS-GaussianPerturbation-batched
+  Random: Random-volume-uniform-ball
+excluded_methods:
+- E-relax
+specification_amendment: sources/USER_AMENDMENT_20261005.md
+oracle_scalar_grid: 17
+oracle_starts: 4
+oracle_maxiter: 150
+e_relax_max_rounds: 256
+oracle_audit_interval_batches: 200
+estimator_max_iter: 80
+workers: 8
+blas_threads: 1
+backend: cpu
+gaussian_exact_deduplication: true
+plot_interval_seconds: 3600
+checkpoint_counts:
+- 0
+- 20
+- 40
+- 80
+- 160
+- 400
+directions:
+  '5':
+  - 0.4217096566780513
+  - -0.5815418559928266
+  - -0.06195811113951962
+  - -0.09552903232542469
+  - 0.6862983546824876
+  '10':
+  - 0.4875712311411106
+  - 0.1059631038663393
+  - 0.4961133349330258
+  - 0.35627747651132685
+  - 0.33247922877332203
+  - -0.03825922140952204
+  - -0.03902451570282228
+  - -0.10076558113813112
+  - 0.2953053854992039
+  - -0.4087737055554835
+  '20':
+  - -0.24530953913846018
+  - 0.2974124317896712
+  - 0.027763065837819297
+  - 0.0432692960119234
+  - -0.06469554158505374
+  - 0.04737845381486807
+  - 0.23134825954590577
+  - 0.006899025703631327
+  - -0.31722511479077864
+  - 0.16642936175776246
+  - -0.16356236615777459
+  - 0.3386143713821578
+  - -0.07595430034873975
+  - -0.18263435548766713
+  - 0.22979949832140065
+  - 0.2793969632333106
+  - -0.05857550630258942
+  - -0.14780597259622263
+  - 0.5680295704476461
+  - -0.03245366591053068

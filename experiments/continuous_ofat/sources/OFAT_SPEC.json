@@ -1,0 +1,110 @@
+{
+  "specification_only": true,
+  "project": "FisherBalancing-continuous-OFAT",
+  "source_file": "FisherBalancing_source.tex",
+  "families": [
+    "gaussian",
+    "bernoulli"
+  ],
+  "methods": [
+    "Ours",
+    "A-opt",
+    "D-opt",
+    "E-greedy",
+    "E-relax",
+    "UCB",
+    "TS",
+    "Random"
+  ],
+  "conditions": [
+    {
+      "id": "center",
+      "d": 10,
+      "L": 1.0,
+      "m": 10,
+      "kappa": 1.5
+    },
+    {
+      "id": "dim5",
+      "d": 5,
+      "L": 1.0,
+      "m": 10,
+      "kappa": 1.5
+    },
+    {
+      "id": "dim20",
+      "d": 20,
+      "L": 1.0,
+      "m": 10,
+      "kappa": 1.5
+    },
+    {
+      "id": "radius05",
+      "d": 10,
+      "L": 0.5,
+      "m": 10,
+      "kappa": 1.5
+    },
+    {
+      "id": "radius2",
+      "d": 10,
+      "L": 2.0,
+      "m": 10,
+      "kappa": 1.5
+    },
+    {
+      "id": "batch5",
+      "d": 10,
+      "L": 1.0,
+      "m": 5,
+      "kappa": 1.5
+    },
+    {
+      "id": "batch20",
+      "d": 10,
+      "L": 1.0,
+      "m": 20,
+      "kappa": 1.5
+    }
+  ],
+  "master_seed": 20261005,
+  "query_domain": "closed_euclidean_ball",
+  "parameter_radius": 4.0,
+  "rho": 1.0,
+  "warm_start": 0,
+  "fixed_signal_strength": 1.5,
+  "target_norm_rule": "kappa / L",
+  "query_reuse_within_batch": true,
+  "query_reuse_across_batches": true,
+  "feedback": "after_entire_batch",
+  "N_cal": 400,
+  "N_run": 20000,
+  "temperature_exponent": 0.75,
+  "temperature_rule": "R * sqrt(m / (8 * log(d))) * (N / N_cal)**0.75",
+  "temperature_R": {
+    "gaussian": "L**2",
+    "bernoulli": "L**2/4"
+  },
+  "clip_temperature_after_calibration": false,
+  "recalibrate_on_resume_or_extension": false,
+  "replicates_noncentral": 256,
+  "replicates_center": 512,
+  "preview_replicates": 32,
+  "preview_N": 2000,
+  "production_extensions_enabled": false,
+  "precision": "float64",
+  "checkpoint_interval_seconds": 60,
+  "status_interval_seconds": 30,
+  "oracle_feasibility_tolerance": 1e-09,
+  "oracle_audit_relative_score_tolerance": 1e-06,
+  "estimator_normalized_kkt_tolerance": 1e-08,
+  "e_relax_relative_tolerance": 0.0001,
+  "e_relax_rounding": "systematic_randomized",
+  "e_relax_exchange_passes": 0,
+  "reference_relative_gap_tolerance": 1e-07,
+  "ucb_delta": 0.05,
+  "compute_policy": "profile_fastest_authorized_resources",
+  "expected_family_condition_combinations": 14,
+  "expected_family_condition_method_combinations": 112,
+  "expected_logical_trajectories": 32768
+}

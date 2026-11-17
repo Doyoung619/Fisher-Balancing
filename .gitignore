@@ -1,0 +1,44 @@
+# Local environments, caches and machine state
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage*
+htmlcov/
+.DS_Store
+.env
+.env.*
+!.env.example
+*.log
+*.pid
+*.lock
+CURRENT_RUN
+CURRENT_OUTPUT
+STOP_REQUESTED
+
+# Scientific data and generated artifacts stay local.
+data/
+runs/
+outputs/
+results/
+checkpoints/
+trajectories/
+audits/
+deliveries/
+logs/
+artifacts/
+*.npz
+*.npy
+*.pt
+*.pth
+*.pkl
+*.parquet
+*.zip
+*.tar*
+experiments/real_response/*manifest.json
+experiments/real_response/environment.json
+
+# Small, reviewed CSV examples and docs/figures are deliberately tracked.

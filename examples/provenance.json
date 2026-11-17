@@ -1,0 +1,39 @@
+{
+  "description": "Selected historical aggregate results only, not new experiments.",
+  "artifacts": [
+    {
+      "path": "docs/figures/sampled_bernoulli_tracking.png",
+      "source_path": "experiments/sampled_ball/runs/20261006T0031_final/figures/final/bernoulli_central_tracking.png",
+      "sha256": "c1eb5f6fd34f4e7074010069d19ba1ac5ad7bd8674d212a46b966ccb76e74cc6",
+      "source_sha256": "c1eb5f6fd34f4e7074010069d19ba1ac5ad7bd8674d212a46b966ccb76e74cc6",
+      "role": "Historical final figure, N=10000, K=Q=4096; FB256/comparators64 response replicates, d10 L1 m10"
+    },
+    {
+      "path": "docs/figures/real_movielens.png",
+      "source_path": "experiments/real_response/outputs/family_baselines_20261005/figures_2x2/gaussian_movielens_m20_d10_2x2.png",
+      "sha256": "c31b29f87dd6e49358b05157a6df108ae87967902201a273ab77797872961e64",
+      "source_sha256": "c31b29f87dd6e49358b05157a6df108ae87967902201a273ab77797872961e64",
+      "role": "Historical final figure, Gaussian MovieLens d10 m20, n0=80 budget400, 10 paired seeds, ours=fb_opt2"
+    },
+    {
+      "path": "examples/real_movielens_curve.csv",
+      "source_path": "experiments/real_response/outputs/family_baselines_20261005/figures_2x2/gaussian_movielens_m20_d10_2x2.csv",
+      "sha256": "3557a342611b9760507e2ec3255f7c35433563367e8f04713c49502516f8e6b7",
+      "source_sha256": "15ba2b2b666c216ca66c0bfcb3db82864aa0c8e95f82dda60cc413a823ac3a41",
+      "role": "Exact aggregate curves for the one historical MovieLens figure; no raw responses"
+    },
+    {
+      "path": "examples/sampled_endpoints.csv",
+      "source_path": "experiments/sampled_ball/runs/20261006T0031_final/figures/final/endpoint_table.csv",
+      "source_sha256": "f258755f6567fe79a140f8bb7eba719893a07d7a2ad271c05cd51cf36beaca83",
+      "sha256": "0a8db575bdb93e2d86ba97faaac33df205c003ec7d2f31bb2b62ab2226a3faa1",
+      "selection": "condition == 'central'; all families/methods",
+      "rows": 14
+    }
+  ],
+  "toy_pool": {
+    "path": "examples/toy_pool.csv",
+    "kind": "artificial deterministic Python random.Random(619), 160 rows; 120 pool/40 test",
+    "sha256": "7199e37272a93e7c1bf668e82387b3ef24eda77e1e9b6bace8aa37ad32d988f6"
+  }
+}

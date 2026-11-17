@@ -1,0 +1,3 @@
+-r requirements.txt
+# Select the CPU/CUDA wheel index for your system when installing this file.
+torch==2.4.1

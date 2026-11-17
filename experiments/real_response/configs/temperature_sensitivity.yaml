@@ -1,0 +1,190 @@
+bait_normalization: matched_sum_information
+candidate_rule: shared_hash_priority
+datasets:
+  lastfm:
+    additional_labels: 400
+    artist_count: 20
+    batch_size: 20
+    candidate_cap: 256
+    eval_start_utc: '2008-05-05T00:00:00Z'
+    eval_weeks: 52
+    history_days: 180
+    history_min_active_weeks: 4
+    history_min_scrobbles: 100
+    pool_cap: 10000
+    pool_weeks: 42
+    source: lastfm_1k_50user_release_v1
+    test_cap: 5000
+  movielens:
+    additional_labels: 400
+    batch_size: 20
+    candidate_cap: 256
+    pool_cap: 10000
+    response_transform: subtract_fixed_3
+    source: movielens_100k
+    split: chronological_80_20_then_hash_subsample
+    test_cap: 5000
+  obd:
+    additional_labels: 4000
+    batch_size: 200
+    behavior_policy: random
+    campaign: all
+    candidate_cap: 512
+    source: obd_small
+    split: chronological_80_20
+dimensions:
+- 20
+fb_range_multiplier: 1.0
+fb_tau0: 0.01
+feature_components: 19
+feature_fit_scope: pool_only
+feature_mode: nested_pca_unwhitened
+feature_scale_scope: maximum_supported_dimension_pool_only
+fitting_objective: sum_nll_plus_fixed_ridge
+initialization_dimension: 20
+intercept_in_dimension: true
+learner_grad_relative_tolerance: 1.0e-08
+learner_max_iter: 50
+matched_regularization_reference: every_checkpoint
+method_family_policy:
+  badge:
+  - bernoulli
+methods:
+- fb_sample
+- fb_range
+- a_opt
+- d_opt
+- e_greedy
+- ucb_glm
+- ts_glm
+- random
+- bait_glm
+- e_sdp
+- badge
+metrics:
+  Q_regularization: 0.0
+  R2_and_R2_squared: required
+  Rdir_and_Rdir_squared: required
+  batch_candidate_and_selection_audit: required
+  checkpoint: warm_and_every_completed_batch
+  covariance_centering_for_Q: false
+  fit_loss_audit: required
+  full_pool_objective_gaps: required
+  information_tracking_operator_norm: required
+  matched_reference_metrics: required
+  mean_l2: required
+  predictive_test_metrics: required
+  reference_and_plugin_lambda_min: required
+  risk_seed_count: 10
+  save_bias_centered_covariance_separately: true
+  save_full_information_matrices:
+  - V_ref
+  - V_hat
+  - V_acq
+  - H_design
+  save_full_spectra: true
+  save_signed_error_vectors: true
+  save_theta_vectors: true
+  theoretical_truth_values: not_identified_in_real_data
+  uncentered_Q: required
+n0: 80
+penalize_intercept: true
+preprocess_seed: 20261004
+protocol_name: fisherbalancing_real_response_v2
+reference_grad_relative_tolerance: 1.0e-09
+reference_max_iter: 200
+reference_per_dimension: true
+reference_scope: fixed_pool_all_labels
+reference_shared_across_seeds: true
+rho: 1.0
+run_seeds:
+- 0
+- 1
+- 2
+- 3
+- 4
+- 5
+- 6
+- 7
+- 8
+- 9
+runtime:
+  allow_cpu_only_when_faster: true
+  allowed_gpu_ids:
+  - 0
+  - 1
+  - 2
+  - 3
+  backend: auto_measured_cpu_or_cuda_or_hybrid
+  blas_threads_per_worker_initial: 1
+  cpu_limit: actual_cpuset_and_cgroup
+  cpu_tokens_shared_across_all_queues: true
+  cpu_worker_candidates:
+  - 16
+  - 24
+  - 32
+  - 48
+  - 64
+  cpu_workers: auto_measured
+  dtype: float64
+  goal: fastest_validated_end_to_end
+  gpu_lane_candidates:
+  - 1
+  - 4
+  - 8
+  - 16
+  gpu_memory_fraction_limit: 0.85
+  gpu_worker_processes_per_device_initial: 1
+  mandatory_postprocessing_before_main_complete: true
+  max_download_mb: 100
+  os_ram_reserve_gib: 8
+  pilot_max_wall_minutes: 10
+  preview_is_global_barrier: false
+  preview_seeds:
+  - 0
+  - 1
+  - 2
+  - 3
+  - 4
+  ram_available_fraction_limit: 0.85
+  resume: true
+  scheduler: work_conserving_cost_aware
+  scientific_rng_independent_of_device: true
+  sdp_queue_separate: true
+  telemetry_interval_seconds: 10
+  tuning_policy: bounded_successive_halving
+schema_version: 2
+sdp:
+  benchmark_available_solvers: true
+  dependent_rounding_draws: 8
+  eps_abs: 0.0001
+  eps_rel: 0.0001
+  max_iters: 5000
+  primary_solver: SCS
+  record_dual_upper_bound: true
+  same_external_quality_gate: true
+  swap_max_passes: 1
+  swap_max_proposals: 128
+  feasibility_tolerance: 0.0005
+  objective_gap_tolerance: 0.002
+uncertainty:
+  bootstrap_draws: 1000
+  bootstrap_scope: endpoint
+  leave_one_seed_out_risk: all_checkpoints
+  nonlinear_risk_interval: descriptive_whole_seed_bootstrap
+  paired_seed_resampling: true
+  per_run_scalar_mean_interval: descriptive_student_t
+profile: temperature_sensitivity
+sensitivity:
+  fb_tau0:
+  - 0.003
+  - 0.01
+  - 0.03
+  fb_range_multiplier:
+  - 0.3
+  - 1.0
+  - 3.0
+e_backend_by_dimension:
+  5: batched
+  10: secular
+  20: secular

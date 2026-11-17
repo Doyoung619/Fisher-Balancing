@@ -1,0 +1,151 @@
+{
+  "project": "FisherBalancing-sampled-ball",
+  "preset": "preferred_full_scan",
+  "N_run": 10000,
+  "K": 4096,
+  "Q": 4096,
+  "full_scan": true,
+  "families": [
+    "gaussian",
+    "bernoulli"
+  ],
+  "methods": [
+    "FB",
+    "AOpt",
+    "DOpt",
+    "EGreedy",
+    "UCB",
+    "TS",
+    "Random"
+  ],
+  "conditions": [
+    {
+      "id": "central",
+      "d": 10,
+      "L": 1.0,
+      "m": 10,
+      "kappa": 1.5
+    },
+    {
+      "id": "dim5",
+      "d": 5,
+      "L": 1.0,
+      "m": 10,
+      "kappa": 1.5
+    },
+    {
+      "id": "dim20",
+      "d": 20,
+      "L": 1.0,
+      "m": 10,
+      "kappa": 1.5
+    },
+    {
+      "id": "radius05",
+      "d": 10,
+      "L": 0.5,
+      "m": 10,
+      "kappa": 1.5
+    },
+    {
+      "id": "radius2",
+      "d": 10,
+      "L": 2.0,
+      "m": 10,
+      "kappa": 1.5
+    },
+    {
+      "id": "batch5",
+      "d": 10,
+      "L": 1.0,
+      "m": 5,
+      "kappa": 1.5
+    },
+    {
+      "id": "batch20",
+      "d": 10,
+      "L": 1.0,
+      "m": 20,
+      "kappa": 1.5
+    }
+  ],
+  "directions": {
+    "5": [
+      -0.5586313444443124,
+      0.4083017132995447,
+      0.19818325317218172,
+      0.13110647392015032,
+      0.6817295817106019
+    ],
+    "10": [
+      0.3195875515644736,
+      0.22323682818659732,
+      0.4901022466862292,
+      -0.2643497508448226,
+      0.3168852590995049,
+      -0.278525553243215,
+      0.057022929816206956,
+      0.28957013443348706,
+      -0.22973430358635316,
+      -0.4691215553336313
+    ],
+    "20": [
+      0.15242868467095907,
+      0.09525667461193657,
+      -0.07403175134956998,
+      0.11634183924852307,
+      0.15845744980395285,
+      0.233815769560451,
+      0.02759229436669552,
+      0.23699374637258944,
+      -0.2084909909647842,
+      0.170093068110689,
+      -0.25217200099333004,
+      -0.45224334286066936,
+      -0.14789444524581621,
+      0.5152803095169936,
+      -0.13034716253751047,
+      0.1484513888144701,
+      0.17956750776500147,
+      -0.1587357535216709,
+      0.1292698519117813,
+      0.26624744134956685
+    ]
+  },
+  "rho": 1.0,
+  "parameter_radius": 4.0,
+  "N_cal": 400,
+  "ucb_delta": 0.05,
+  "ts_covariance_scale": 1.0,
+  "fb_replicates_central": 256,
+  "fb_replicates_noncentral": 128,
+  "comparator_replicates_central": 64,
+  "comparator_replicates_noncentral": 32,
+  "global_cloud_seed": 20261006,
+  "global_noise_seed": 20261007,
+  "global_policy_seed": 20261008,
+  "checkpoint_interval_seconds": 45,
+  "progress_interval_seconds": 10,
+  "bootstrap_resamples": 200,
+  "bernoulli_radial_levels": [
+    0.25,
+    0.5,
+    0.75,
+    1.0
+  ],
+  "float_precision": "float64",
+  "query_domain": "continuous Euclidean ball",
+  "oracle": "fresh Monte-Carlo approximation of the continuous acquisition oracle",
+  "feedback": "after_entire_batch",
+  "initial_theta": "zero",
+  "forced_exploration": false,
+  "temperature": "tau0 = R sqrt(m/(8 log(d))) / 400**0.75; tau_t = tau0*(m*t)**0.75; no clipping",
+  "user_budget_amendment": "User explicitly permits N_run=5000 when measured ETA exceeds two hours; supersedes attachment minimum 10000.",
+  "shortlist_qualification": "Shortlist disabled: full K scan at every virtual position. Independent audit of the prescribed Q128->256 acceleration found material unaudited score losses; correctness fallback preserves K/N/replicates.",
+  "ucb_convention": "continuous_ofat/src/methods.py: design-covariance ellipsoid, delta .05, radius4, no within-batch covariance update",
+  "ts_convention": "continuous_ofat/src/methods.py: independent per-query N(theta,Vhat^-1), scale1",
+  "cpu_workers": 28,
+  "gpu_workers": 4,
+  "backend_assignment": "bernoulli_light_cpu",
+  "exact_oracle_theorem_applies": false
+}

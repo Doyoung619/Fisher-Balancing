@@ -1,0 +1,3778 @@
+% !TeX program = pdflatex
+% !BIB program = bibtex
+% FisherBalancing v3: plain-language main text; explicit mT; proofs retained.
+% Detailed proofs are included for author and independent mathematical review.
+% This manuscript is not a formal proof certificate or a submission-format certification.
+% Official template: https://aistats.org/aistats2027/AISTATS2027PaperPack.zip
+\documentclass[10pt,twoside,letterpaper]{article}
+% Use the official pack's fancyhdr when compiling from the project root.
+% Register its standard package name before aistats2027 requires it.
+\makeatletter
+\IfFileExists{AISTATS/fancyhdr.sty}{%
+  \usepackage{AISTATS/fancyhdr}%
+  \@namedef{ver@fancyhdr.sty}{}%
+}{}
+\makeatother
+\PassOptionsToPackage{round,authoryear}{natbib}
+\usepackage{aistats2027}
+\usepackage[T1]{fontenc}
+\usepackage[utf8]{inputenc}
+\usepackage{microtype}
+\usepackage{amsmath,amssymb,mathtools,amsthm}
+\usepackage{mathrsfs}
+\usepackage{algorithm}
+\usepackage{algorithmic}
+\usepackage{graphicx}
+\usepackage{subcaption}
+\captionsetup[subfigure]{font=scriptsize,skip=1pt}
+\usepackage{booktabs}
+\usepackage{float}
+\graphicspath{{AISTATS/figure_prepared/main/}{AISTATS/figure_prepared/appendix/}{figure_prepared/main/}{figure_prepared/appendix/}}
+\usepackage{natbib}
+\renewcommand{\bibsection}{\subsubsection*{\refname}}
+\usepackage{xurl}
+\usepackage{hyperref}
+\hypersetup{hidelinks}
+\usepackage[nameinlink,noabbrev]{cleveref}
+\setlength{\emergencystretch}{1em}
+\allowdisplaybreaks[1]
+
+\newtheorem{theorem}{Theorem}
+\newtheorem{proposition}{Proposition}
+\newtheorem{lemma}{Lemma}[section]
+\crefname{theorem}{Theorem}{Theorems}
+\Crefname{theorem}{Theorem}{Theorems}
+\crefname{proposition}{Proposition}{Propositions}
+\Crefname{proposition}{Proposition}{Propositions}
+\crefname{lemma}{Lemma}{Lemmas}
+\Crefname{lemma}{Lemma}{Lemmas}
+\newcommand{\R}{\mathbb R}
+\newcommand{\E}{\mathbb E}
+\newcommand{\Prob}{\mathbb P}
+\newcommand{\tr}{\operatorname{tr}}
+\newcommand{\Cov}{\operatorname{Cov}}
+\newcommand{\op}{\mathrm{op}}
+\newcommand{\argmin}{\operatorname*{arg\,min}}
+\newcommand{\argmax}{\operatorname*{arg\,max}}
+\newcommand{\norm}[1]{\lVert #1\rVert}
+\newcommand{\FB}{\textnormal{\textsc{FisherBalancing}}}
+\newcommand{\thetahat}{\widehat\theta}
+\newcommand{\Vhat}{\widehat V}
+\newcommand{\gstar}{g^\star}
+\newcommand{\Rdir}{\mathfrak R_{\mathrm{dir},T}}
+\newcommand{\Rtwo}{\mathfrak R_{2,T}}
+\newcommand{\PaperTitle}{FisherBalancing: Learning the Optimal Information Rate\protect\\ in Batched GLM Estimation}
+
+\begin{document}
+\runningtitle{Learning the Optimal Information Rate in Batched GLM Estimation}
+\runningauthor{Anonymous Author}
+\twocolumn[
+\aistatstitle{\PaperTitle}
+\aistatsauthor{Anonymous Author}
+\aistatsaddress{Anonymous Institution}
+]
+
+\begin{abstract}
+To accurately estimate parameters with a limited number of observations,
+it is important to decide which data to observe. Information matrices are
+often used for this purpose, but when the information matrix depends on
+the unknown true parameter, a good parameter estimate is needed first in
+order to select good data. We study this problem in Generalized Linear
+Models (GLMs) and propose \FB{}, which uses the current estimate to
+continually reinforce directions with less information. Even when
+selecting multiple data points at once, \FB{} avoids repeatedly selecting
+similar information and collects sufficient information across all
+parameter directions without requiring an accurate initial estimate or
+separate forced exploration. As a result, information in the
+least-informed direction grows at the best achievable rate, and we
+further provide guarantees on finite-time parameter error and the optimal
+asymptotic error in the hardest direction. Experiments using synthetic
+GLMs and inputs obtained from real datasets evaluate both information
+balance and parameter-estimation error.
+\end{abstract}
+
+
+\section{Introduction}
+\label{sec:introduction}
+
+With a limited observation budget, parameter estimation requires deciding
+\emph{which inputs to select for observing responses}. Optimal experimental
+design, adaptive estimation, active regression, and active learning address
+this question \cite{Pukelsheim2006,HuanJagalurMarzouk2024}. Each selected
+input $x$ is a \emph{query}; observing its response $y$ yields a data point
+$(x,y)$. The \emph{information matrix} measures how much these data tell us
+about different parameter directions. Under standard conditions, its
+inverse describes estimation uncertainty. Classical A-, D-, and
+E-optimality use different properties of this matrix to guide selection.
+
+A natural adaptive approach estimates the parameter from collected data
+and uses the resulting information matrix to select new queries. Such methods
+are studied in sequential and adaptive experimental design \cite{Freise2021,Freise2024}. The difficulty is that
+the information matrix can depend on the unknown true parameter, even in
+generalized linear models (GLMs) \cite{KhuriEtAl2006,HuanJagalurMarzouk2024}.
+This creates a circular dependence: selecting useful queries requires a
+good parameter estimate, but obtaining that estimate requires useful
+queries. We study this approach for GLMs and ask:
+
+\begin{quote}
+\emph{Starting from an inaccurate parameter estimate, can we keep using
+the current estimate to select queries and still collect the information needed
+for accurate estimation sufficiently quickly?}
+\end{quote}
+
+Accurate estimation of the full parameter requires more than a large
+amount of information on average. A poorly informed direction---a
+particular combination of parameters---can remain highly uncertain. We
+therefore aim to strengthen the least-informed directions. This principle
+corresponds to \emph{E-optimality}, which maximizes the smallest eigenvalue
+of the information matrix. Whereas D-optimality measures overall
+information and A-optimality measures average estimation uncertainty,
+E-optimality directly targets the direction with the least information.
+
+We propose \FB{} to implement this principle. Using the information matrix
+computed from the current estimate, it scores queries by how much
+information they add to poorly informed directions. It weights multiple
+directions, giving more weight to those with less information, rather than
+following only the weakest one. Within a batch, it adds each selected
+query's expected information to the matrix before choosing the next query.
+This reduces redundant selections without observing new responses. On a
+finite candidate pool, the method simply alternates between scoring
+candidates and updating the matrix.
+
+An inaccurate estimate can misjudge which queries are useful, so the
+success of this rule is not immediate. Under our assumptions, we show
+that information accumulates in every direction without accurate
+initialization or queries reserved solely for exploration. The parameter
+estimate and the resulting information matrix then become more accurate.
+Eventually, information in the least-informed direction grows at the
+best achievable rate.
+
+We also connect this information growth to estimation error. We bound
+parameter error with finitely many observations and, under additional
+conditions, show that the largest mean squared error over unit parameter
+directions attains the optimal asymptotic constant.
+
+Our contributions are threefold.
+\begin{itemize}
+    \item \textbf{Optimal information growth from an inaccurate estimate.}
+    Without accurate initialization or separate forced exploration,
+    information accumulates in every direction and eventually grows at
+    the optimal rate in the least-informed direction.
+
+    \item \textbf{A simple adaptive E-optimal rule.}
+    \FB{} weights poorly informed directions and accounts for the
+    information expected from queries already selected within a batch.
+
+    \item \textbf{Guarantees for parameter estimation.}
+    We bound finite-sample parameter error and, under additional
+    conditions, establish the optimal asymptotic constant for
+    worst-direction mean squared error.
+\end{itemize}
+
+Experiments on synthetic GLMs and inputs from real datasets compare
+\FB{} with A-, D-, and E-optimal design, bandit-based methods, and
+active-learning methods. We evaluate both information in the weakest
+direction and overall parameter-estimation error.
+
+
+
+
+
+
+
+
+
+
+\section{Related Work}
+\label{sec:related}
+
+\paragraph{Optimal experimental design.}
+Optimal experimental design allocates a limited observation budget to
+estimate parameters accurately. A-, D-, and E-optimality use different
+properties of the information matrix \cite{Pukelsheim2006}. Recent work
+covers nonlinear and non-Gaussian models, sequential design, and
+computational methods \cite{HuanJagalurMarzouk2024}, including continuous
+relaxation, rounding, exchange methods, and regret minimization
+\cite{AllenZhu2017}.
+Our focus is adaptive GLM design, where queries are selected using an
+information matrix computed from the current parameter estimate.
+
+We specifically target E-optimality, which maximizes the smallest
+information eigenvalue. Selecting a fixed-size subset of candidates is
+combinatorial, and some variants are NP-hard
+\cite{BrownLaddhaSingh2024}. Optimizing sampling proportions instead
+allows convex or semidefinite formulations. Rather than solving a
+subset-selection problem, \FB{} repeatedly reinforces poorly informed
+directions. In our GLM setting, where queries can be repeated, this rule
+eventually achieves optimal information growth in the weakest direction.
+
+\paragraph{Adaptive estimation and regression.}
+Adaptive experimental design uses the current parameter estimate to
+choose the next query. Adaptive Wynn-type methods analyze this
+process in nonlinear regression and GLMs, establishing consistency and
+long-run D-optimality \cite{Freise2021,Freise2024}. Active regression
+instead selects which responses to obtain from available inputs when
+labels are expensive \cite{ChenPrice2019,ChenLiSun2022}. Its goal is to
+approach the prediction or regression accuracy of the full dataset with
+fewer labels.
+
+\FB{} targets E-optimal information growth for the full GLM parameter.
+Under our assumptions, information accumulates in every direction even
+from an inaccurate estimate, and growth in the weakest direction
+eventually becomes optimal. For batches, the same rule selects queries
+one at a time rather than solving a separate joint design problem.
+
+\paragraph{Active learning and preference learning.}
+Active learning selects which inputs to label using uncertainty, diversity,
+or model gradients. BADGE combines uncertainty and diversity
+\cite{Ash2020}; BAIT uses Fisher information and its connection to
+estimation error for batch selection \cite{Ash2021}; and FIRAL connects
+Fisher-based selection with prediction error in logistic classification
+\cite{ChenBiros2023}. While many such methods target prediction or
+classification, \FB{} targets balanced estimation of the full GLM
+parameter, with guarantees on weakest-direction information growth and
+parameter error.
+
+Preference learning offers a natural application. In a pairwise logistic
+model, the feature difference between two alternatives forms a GLM query,
+so choosing a comparison determines which parameter directions are
+learned. Recent work selects informative comparisons for direct preference
+optimization (DPO), reinforcement learning from human feedback (RLHF),
+and reward modeling \cite{Muldrew2024,Das2025,Shen2025}.
+\FB{} can prioritize comparisons that inform poorly known parameter
+directions, supporting a preference model intended for use across
+multiple decisions.
+% ============================================================================
+% ============================================================================
+% ============================================================================
+% ============================================================================
+\section{Problem Setup}
+\label{sec:setup}
+
+We first define the batched GLM estimation problem, the Fisher information
+used to evaluate queries, and the three quantities that we will track
+throughout the paper.
+
+\subsection{Queries and batched responses}
+
+We begin with the interaction protocol: the learner repeatedly chooses
+queries, observes their responses, and updates an unknown GLM parameter.
+
+Let $\theta^\star\in\Theta\subset\R^d$ be the unknown parameter and let
+$\mathcal X\subset\R^d$ be the feasible query set. We keep
+$\mathcal X$ general here and specialize its geometry only in
+Section~\ref{sec:theory}.
+
+Fix a batch size $m\ge1$. At round $t$, the learner uses only previous
+responses to choose
+\begin{equation}
+\mathcal B_t
+=
+(x_{t,1},\ldots,x_{t,m})
+\in\mathcal X^m,
+\end{equation}
+and then observes all $m$ responses together. Thus $m=1$ gives
+sequential feedback, while $m>1$ gives batched feedback. After $T$
+rounds, the total number of responses is $mT$.
+
+Responses follow a regular canonical generalized linear model (GLM):
+\begin{equation}
+p_\theta(y\mid x)
+=
+h(y)\exp\!\left\{
+yx^\top\theta-A(x^\top\theta)
+\right\}.
+\label{eq:glm}
+\end{equation}
+Its conditional mean is
+\begin{equation}
+\mu_\theta(x)=A'(x^\top\theta).
+\label{eq:glm-mean}
+\end{equation}
+Examples include Bernoulli-logistic and fixed-variance Gaussian
+regression.
+
+Let $\mathcal D_t$ contain all observations from the first $t$ rounds.
+For ridge coefficient $\rho>0$, we compute
+\begin{equation}
+\begin{split}
+\thetahat_t
+\in
+\argmin_{\theta\in\Theta}
+\Bigg\{&
+\sum_{s=1}^{t}\sum_{j=1}^{m}
+\left[
+A(x_{s,j}^\top\theta)
+-
+Y_{s,j}x_{s,j}^\top\theta
+\right]\\
+&+
+\frac{\rho}{2}\norm{\theta}_2^2
+\Bigg\}.
+\end{split}
+\label{eq:mle}
+\end{equation}
+Round $t$ uses $\thetahat_{t-1}$ to select its batch and updates
+$\thetahat_t$ only after the full batch is observed.
+
+Thus the learner must choose useful queries using only its current
+parameter estimate, with no feedback available inside a batch.
+
+
+\subsection{Fisher information}
+
+We next quantify what a query teaches us about the parameter. Fisher
+information provides this quantity directly from the GLM likelihood.
+
+Differentiating the GLM log-likelihood gives the score
+\begin{equation}
+g_\theta(x,y)
+=
+\nabla_\theta\log p_\theta(y\mid x)
+=
+\bigl(y-\mu_\theta(x)\bigr)x.
+\label{eq:likelihood-score}
+\end{equation}
+Since
+$\operatorname{Var}_\theta(Y\mid x)=A''(x^\top\theta)$,
+the Fisher information from query $x$ is
+\begin{equation}
+\begin{aligned}
+G_\theta(x)
+&=
+\E_\theta[
+g_\theta(x,Y)g_\theta(x,Y)^\top
+\mid x]\\
+&=
+w_\theta(x)xx^\top,
+\qquad
+w_\theta(x):=A''(x^\top\theta).
+\end{aligned}
+\label{eq:fisher}
+\end{equation}
+For a batch $\mathcal B=(x_1,\ldots,x_m)$,
+\begin{equation}
+G_\theta(\mathcal B)
+=
+\sum_{j=1}^{m}G_\theta(x_j).
+\label{eq:batch-fisher}
+\end{equation}
+
+For a unit direction $u$,
+\begin{equation}
+u^\top G_\theta(x)u
+=
+w_\theta(x)(x^\top u)^2.
+\label{eq:directional-information}
+\end{equation}
+Thus an informative query must both align with the direction and have
+sufficient response curvature.
+
+The selected queries define the true and plug-in information matrices
+\begin{equation}
+\begin{aligned}
+V_t^\star
+&=
+\rho I+
+\sum_{s=1}^{t}
+G_{\theta^\star}(\mathcal B_s),\\
+\Vhat_t
+&=
+\rho I+
+\sum_{s=1}^{t}
+G_{\thetahat_t}(\mathcal B_s).
+\end{aligned}
+\label{eq:states}
+\end{equation}
+Both use the same queries. $V_t^\star$ is evaluated at the unknown true
+parameter and is used only for analysis, whereas $\Vhat_t$ is
+computable from the current estimate.
+
+The algorithm will therefore select queries using $\Vhat_t$, while our
+analysis checks whether this computable information also reflects the
+true information $V_t^\star$.
+
+
+\subsection{Performance criteria}
+
+We now specify what ``good estimation'' means. We track both how quickly
+information grows and how this growth translates into parameter error.
+
+For any positive definite matrix $V$,
+\begin{equation}
+\max_{\norm{u}_2=1}
+u^\top V^{-1}u
+=
+\lambda_{\min}(V)^{-1}.
+\label{eq:inverse-radius}
+\end{equation}
+Thus $\lambda_{\min}(V)$ measures information in the least-covered
+parameter direction.
+
+Let $\mathcal P(\mathcal X)$ be the set of probability measures on
+$\mathcal X$. For $\nu\in\mathcal P(\mathcal X)$, define
+\begin{equation}
+M(\nu)
+=
+\int_{\mathcal X}
+G_{\theta^\star}(x)\,d\nu(x).
+\end{equation}
+The optimal information growth rate per query is
+\begin{equation}
+\begin{aligned}
+\gamma^\star
+&=
+\sup_{\nu\in\mathcal P(\mathcal X)}
+\lambda_{\min}(M(\nu)),\\
+\gstar
+&=
+m\gamma^\star.
+\end{aligned}
+\label{eq:gamma-star}
+\end{equation}
+Hence $\gamma^\star$ is the best long-run rate at which any query
+allocation can increase its weakest directional information.
+
+Let
+\begin{equation}
+e_T
+=
+\thetahat_T-\theta^\star.
+\end{equation}
+We evaluate the Euclidean and worst-direction RMSEs
+\begin{equation}
+\begin{aligned}
+\Rtwo
+&=
+\left(
+\E_{\theta^\star}
+\norm{e_T}_2^2
+\right)^{1/2},\\
+\Rdir
+&=
+\sup_{\norm{u}_2=1}
+\left(
+\E_{\theta^\star}
+[(u^\top e_T)^2]
+\right)^{1/2}.
+\end{aligned}
+\label{eq:risks}
+\end{equation}
+If
+$Q_T=\E_{\theta^\star}[e_Te_T^\top]$,
+then
+\begin{equation}
+\Rtwo^2
+=
+\tr(Q_T),
+\qquad
+\Rdir^2
+=
+\lambda_{\max}(Q_T).
+\end{equation}
+
+Our main performance quantities are
+$\gamma^\star$, $\Rdir$, and $\Rtwo$: information growth, error in the
+hardest direction, and total parameter error.
+
+
+% ============================================================================
+\section{Algorithm}
+\label{sec:algorithm}
+
+We now introduce \FB{}. The key idea is to give more attention to
+directions with less information and to update this balance while a batch
+is being constructed.
+
+\subsection{Weighting under-observed directions}
+
+We first define how \FB{} identifies which parameter directions currently
+need more information.
+
+Recall that $\Vhat_t$ is the plug-in information matrix. While building
+a new batch, we maintain a temporary plug-in state $W$, initialized as
+$W=\Vhat_{t-1}$.
+
+For temperature $\tau>0$, define
+\begin{equation}
+P_\tau(W)
+=
+\frac{\exp(-W/\tau)}
+{\tr\exp(-W/\tau)}.
+\label{eq:gibbs}
+\end{equation}
+If $\lambda_i$ is an eigenvalue of $W$, its eigenvector receives weight
+proportional to $e^{-\lambda_i/\tau}$. Thus less-informed directions
+receive larger weight.
+
+For an available estimate $\widehat\theta$, define
+\begin{equation}
+\begin{aligned}
+s(x;W,\widehat\theta)
+&=
+\tr\!\left(
+P_\tau(W)G_{\widehat\theta}(x)
+\right)\\
+&=
+w_{\widehat\theta}(x)
+x^\top P_\tau(W)x.
+\end{aligned}
+\label{eq:score}
+\end{equation}
+The score measures the information expected to be added to currently
+under-observed directions. Equivalently, for any positive semidefinite
+trace-one matrix $P$,
+\begin{equation}
+\E_\theta
+\left[
+\norm{P^{1/2}g_\theta(x,Y)}_2^2
+\mid x
+\right]
+=
+\tr(PG_\theta(x)).
+\label{eq:projected-score}
+\end{equation}
+
+Thus each candidate receives a large score when it is informative
+precisely where the current estimate has accumulated less information.
+
+
+\subsection{Greedy batch construction}
+
+We next use this score to construct a batch without observing any
+responses inside the batch.
+
+At round $t$, set $W=\Vhat_{t-1}$. For $j=1,\ldots,m$, choose
+\begin{equation}
+x_{t,j}
+\in
+\argmax_{x\in\mathcal X}
+\tr\!\left(
+P_{\tau_t}(W)
+G_{\thetahat_{t-1}}(x)
+\right),
+\label{eq:batch-query}
+\end{equation}
+then update
+\begin{equation}
+W
+\leftarrow
+W+
+G_{\thetahat_{t-1}}(x_{t,j}).
+\label{eq:temporary-update}
+\end{equation}
+This update uses no new response; it only accounts for information
+expected from queries already selected in the current batch. After all
+$m$ queries are chosen, their responses are observed together and the
+model is refitted.
+
+\begin{algorithm}[t]
+\caption{\FB{} with batch size $m$}
+\label{alg:fb}
+\begin{algorithmic}[1]
+\REQUIRE Query set $\mathcal X$; parameter set $\Theta$; batch size $m$;
+ridge $\rho>0$; fixed coefficient $\tau_0>0$
+(prescribed-budget calibration: \eqref{eq:temperature}).
+\STATE Set $\mathcal D_0=\varnothing$, $\Vhat_0=\rho I$, and
+$\thetahat_0\in\argmin_{\theta\in\Theta}\norm{\theta}_2^2$.
+\FOR{$t=1,\ldots,T$}
+  \STATE Set $\tau_t=\tau_0(mt)^{3/4}$ and $W=\Vhat_{t-1}$.
+  \FOR{$j=1,\ldots,m$}
+    \STATE Select $x_{t,j}$ by \eqref{eq:batch-query}.
+    \STATE Update $W$ by \eqref{eq:temporary-update}.
+  \ENDFOR
+  \STATE Observe $Y_{t,1},\ldots,Y_{t,m}$ together.
+  \STATE Refit $\thetahat_t$ and recompute $\Vhat_t$.
+\ENDFOR
+\RETURN $\thetahat_T$ and $\Vhat_T$.
+\end{algorithmic}
+\end{algorithm}
+
+The temporary update is what makes the method naturally batched: each
+new query is chosen after accounting for what the rest of the current
+batch is already expected to learn.
+
+
+\subsection{Connection to optimal information growth}
+
+Finally, we explain why the acquisition score is aligned with our target
+$\gamma^\star$, rather than being only a heuristic weighting rule.
+
+The target $\gamma^\star$ is the best achievable growth rate of the
+minimum directional information. To connect our score to this objective,
+define
+\begin{equation}
+\Phi_\tau(W)
+=
+-\tau\log\tr\exp(-W/\tau).
+\label{eq:potential}
+\end{equation}
+It satisfies
+\begin{equation}
+\lambda_{\min}(W)-\tau\log d
+\le
+\Phi_\tau(W)
+\le
+\lambda_{\min}(W),
+\end{equation}
+and
+\begin{equation}
+\left.
+\frac{d}{d\eta}
+\Phi_\tau
+\left(
+W+\eta G_\theta(x)
+\right)
+\right|_{\eta=0}
+=
+\tr\!\left(
+P_\tau(W)G_\theta(x)
+\right).
+\label{eq:potential-gradient}
+\end{equation}
+Thus the \FB{} score is the first-order improvement of a smooth
+minimum-information objective.
+
+For a prescribed calibration budget $N_{\max}=mT_{\max}$ and a
+positive reference scale $R$, we set, for $d\ge2$,
+\begin{equation}
+\begin{aligned}
+\tau_{\mathrm{range}}
+&=R\sqrt{\frac{m}{8\log d}},\\
+\tau_0
+&=\frac{\tau_{\mathrm{range}}}{N_{\max}^{3/4}},
+\qquad
+\tau_t=\tau_0(mt)^{3/4}.
+\end{aligned}
+\label{eq:temperature}
+\end{equation}
+The temperature reaches $\tau_{\mathrm{range}}$ at the prescribed
+budget. Appendix~\ref{app:range-calibration} gives the derivation and
+its applicability conditions. The asymptotic results below hold
+$\tau_0$ fixed.
+
+In short, \FB{} greedily improves a smooth version of the same
+least-direction information criterion used to define
+$\gamma^\star$.
+
+
+% ============================================================================
+\section{Theory}
+\label{sec:theory}
+
+We now ask three questions: how fast information can possibly grow,
+whether \FB{} reaches that rate, and whether this information growth is
+statistically optimal for parameter estimation.
+
+The algorithm is defined for general $\mathcal X$. For analysis, we now
+specialize to the full Euclidean ball
+\begin{equation}
+\mathcal X
+=
+\left\{
+x\in\R^d:
+\norm{x}_2\le L
+\right\}.
+\label{eq:theory-ball}
+\end{equation}
+Queries may be repeated with fresh responses. The following guarantees
+apply to this full-ball setting; finite candidate pools used in the
+experiments are empirical extensions.
+
+
+\subsection{Conditions}
+\label{sec:conditions}
+
+We first state the regularity conditions needed to control both the GLM
+estimator and the information computed from its current estimate.
+
+Assume $\Theta$ is compact and convex, contains $\theta^\star$, and
+\begin{equation}
+\sup_{\theta\in\Theta}
+\norm{\theta}_2
+\le
+S.
+\end{equation}
+For all $z,z'\in[-LS,LS]$, assume
+\begin{equation}
+\begin{aligned}
+0<\underline w
+&\le
+A''(z)
+\le
+\overline w<\infty,\\
+|A''(z)-A''(z')|
+&\le
+L_A|z-z'|.
+\end{aligned}
+\label{eq:regularity}
+\end{equation}
+
+With
+\begin{equation}
+\xi_{t,j}
+=
+Y_{t,j}
+-
+\mu_{\theta^\star}(x_{t,j}),
+\end{equation}
+assume conditional independence within each selected batch and
+\begin{equation}
+\E
+\left[
+e^{a\xi_{t,j}}
+\mid
+\mathcal D_{t-1},\mathcal B_t
+\right]
+\le
+e^{a^2\sigma^2/2},
+\qquad
+a\in\R.
+\label{eq:noise-condition}
+\end{equation}
+
+These assumptions cover bounded logistic and unit-variance Gaussian
+GLMs. We further assume exact maximization of
+\eqref{eq:batch-query} over the ball. We do not require orthogonal
+queries, an eigenvalue gap, accurate initialization, or forced
+exploration.
+
+These conditions are sufficient to learn the unknown GLM while keeping
+the plug-in Fisher information uniformly controlled.
+
+
+\subsection{Optimal information growth}
+\label{sec:information-rate}
+
+We first identify the fastest rate any policy could achieve, and then
+compare \FB{} against this universal benchmark.
+
+Under the full-ball setting, the supremum defining $\gamma^\star$ is
+attained.
+
+\begin{proposition}[Universal information bound]
+\label{prop:ceiling}
+For every adaptive policy,
+\begin{equation}
+\frac{\underline wL^2}{d}
+\le
+\gamma^\star
+\le
+\frac{\overline wL^2}{d},
+\end{equation}
+and
+\begin{equation}
+\lambda_{\min}(V_T^\star)
+\le
+\rho+mT\gamma^\star.
+\label{eq:ceiling}
+\end{equation}
+\end{proposition}
+
+Thus $\gamma^\star$ is a universal upper rate for minimum directional
+information.
+
+Define
+\begin{equation}
+\varepsilon_{m,T}(\delta)
+=
+C
+\left[
+\frac{\log(emT/\delta)}
+{(mT)^{1/4}}
++
+\frac1T
+\right],
+\label{eq:rate-error}
+\end{equation}
+where $C$ is independent of $m,T,\delta$.
+
+\begin{theorem}[\FB{} information optimality]
+\label{thm:information}
+With probability at least $1-\delta$, simultaneously for all $T\ge1$,
+\begin{equation}
+\left|
+\frac{\lambda_{\min}(\Vhat_T)}{mT}
+-
+\gamma^\star
+\right|
+\le
+\varepsilon_{m,T}(\delta),
+\label{eq:plugin-rate}
+\end{equation}
+and
+\begin{equation}
+0
+\le
+\frac{
+\rho+mT\gamma^\star
+-
+\lambda_{\min}(V_T^\star)
+}{
+mT
+}
+\le
+\varepsilon_{m,T}(\delta).
+\label{eq:true-rate}
+\end{equation}
+\end{theorem}
+
+Thus both the plug-in and true information approach the optimal rate.
+Moreover, once
+$\varepsilon_{m,T}(\delta)\le\gamma^\star/2$,
+\begin{equation}
+\frac{
+\norm{\Vhat_T-V_T^\star}_{\op}
+}{
+mT
+}
+\le
+C'
+\sqrt{
+\frac{
+\log(emT/\delta)
+}{
+mT
+}
+}.
+\label{eq:tracking}
+\end{equation}
+
+For fixed $m$,
+\begin{equation}
+\begin{aligned}
+\frac{\lambda_{\min}(\Vhat_T)}{T}
+&\longrightarrow
+\gstar,\\
+\frac{\lambda_{\min}(V_T^\star)}{T}
+&\longrightarrow
+\gstar
+\end{aligned}
+\qquad
+\text{a.s.}
+\label{eq:main-limit}
+\end{equation}
+
+The $1/T$ term reflects fewer parameter updates under larger batches;
+it is an analysis upper bound, not an unavoidable batching cost. We do
+not claim that the finite-time rate $(mT)^{-1/4}$ is optimal.
+
+The main conclusion is that \FB{} asymptotically collects information
+in its hardest direction as fast as any policy can.
+
+
+\subsection{Parameter recovery}
+\label{sec:confidence}
+
+We next translate the information guarantee into a direct bound on the
+error of the estimated parameter.
+
+Define
+\begin{equation}
+C_{\mathrm{glm}}
+=
+\frac{
+\sqrt{\max\{1,\overline w\}}
+}{
+\min\{1,\underline w\}
+},
+\end{equation}
+and
+\begin{equation}
+\begin{split}
+\beta_{m,T}(\delta)
+=
+C_{\mathrm{glm}}
+\Bigg[
+&
+\sigma
+\sqrt{
+d\log\!\left(
+1+\frac{mTL^2}{\rho d}
+\right)
++
+2\log\frac2\delta
+}\\
+&+
+\sqrt\rho\,S
+\Bigg].
+\end{split}
+\label{eq:confidence-radius}
+\end{equation}
+
+\begin{proposition}[\FB{} parameter recovery]
+\label{prop:confidence}
+For every unit $u$,
+\begin{equation}
+|u^\top e_T|
+\le
+\beta_{m,T}(\delta)
+\sqrt{
+u^\top\Vhat_T^{-1}u
+}.
+\label{eq:directional-confidence}
+\end{equation}
+If $\varepsilon_{m,T}(\delta)<\gamma^\star$, then
+\begin{equation}
+\norm{e_T}_2
+\le
+\frac{
+\beta_{m,T}(\delta)
+}{
+\sqrt{
+mT
+\left(
+\gamma^\star
+-
+\varepsilon_{m,T}(\delta)
+\right)
+}
+}.
+\label{eq:l2-confidence}
+\end{equation}
+\end{proposition}
+
+Both bounds hold on the event of
+Theorem~\ref{thm:information}. For fixed $m$,
+$\thetahat_T\to\theta^\star$ almost surely.
+
+Thus the optimal information growth above is not only a spectral
+property: it directly yields shrinking directional and Euclidean
+parameter error.
+
+
+\subsection{Sharp worst-direction risk}
+\label{sec:sharp-risk}
+
+Finally, we ask whether the worst-direction error of \FB{} is only
+consistent, or whether its asymptotic constant is also the best possible.
+
+We first give a lower bound for competing adaptive estimators, and then
+show that \FB{} with the ridge MLE attains it.
+
+For policy $\pi$, define
+\begin{equation}
+\mathcal J_T^\pi
+=
+\E_{\theta^\star}
+\left[
+\sum_{t=1}^{T}
+G_{\theta^\star}(\mathcal B_t^\pi)
+\right].
+\end{equation}
+For a competing estimator $\widetilde\theta_T$, let
+\begin{equation}
+a_T(\theta)
+=
+\E_\theta[\widetilde\theta_T],
+\qquad
+D_T
+=
+\nabla_\theta a_T(\theta^\star).
+\end{equation}
+
+We consider estimators with finite second moments for which $a_T$ is
+differentiable at an interior $\theta^\star$ and likelihood
+differentiation is valid. Define
+\begin{equation}
+U_T
+=
+\sum_{t=1}^{T}\sum_{j=1}^{m}
+x_{t,j}
+\left[
+Y_{t,j}
+-
+\mu_{\theta^\star}(x_{t,j})
+\right].
+\end{equation}
+The required identity is
+\begin{equation}
+D_T
+=
+\E_{\theta^\star}
+\left[
+(\widetilde\theta_T-\theta^\star)
+U_T^\top
+\right].
+\label{eq:mean-score-identity}
+\end{equation}
+
+\begin{proposition}[Universal directional lower bound]
+\label{prop:risk-lower}
+Every estimator in this comparison class satisfies
+\begin{equation}
+\mathfrak R_{\mathrm{dir},T}
+(\widetilde\theta_T)^2
+\ge
+\frac{
+s_{\min}(D_T)^2
+}{
+mT\gamma^\star
+}.
+\label{eq:risk-lower-general}
+\end{equation}
+\end{proposition}
+
+In particular, local unbiasedness gives
+\begin{equation}
+\mathfrak R_{\mathrm{dir},T}^2
+\ge
+\frac1{mT\gamma^\star},
+\end{equation}
+while $D_T\to I$ implies
+\begin{equation}
+\liminf_{T\to\infty}
+T\gstar\,
+\mathfrak R_{\mathrm{dir},T}^2
+\ge
+1.
+\label{eq:asymptotic-lower}
+\end{equation}
+
+This gives the benchmark: no asymptotically regular estimator in the
+comparison class can beat the constant $1$ after normalization by
+$T\gstar$.
+
+We now return to \FB{}. Assume additionally that $\theta^\star$ is
+interior to $\Theta$ and that every measure attaining $\gamma^\star$
+induces the same information matrix. For any maximizing measure
+$\nu^\star$, write
+\begin{equation}
+M^\star
+=
+M(\nu^\star),
+\qquad
+J^\star
+=
+mM^\star.
+\end{equation}
+
+\begin{proposition}[\FB{} attains the sharp bound]
+\label{prop:efficiency}
+For \FB{} with the ridge MLE and fixed $m$,
+\begin{equation}
+mTQ_T
+\longrightarrow
+(M^\star)^{-1},
+\qquad
+D_T
+\longrightarrow
+I.
+\label{eq:mse-matrix}
+\end{equation}
+\end{proposition}
+
+Consequently,
+\begin{equation}
+T\gstar\,\Rdir^2
+\longrightarrow
+1,
+\label{eq:sharp-directional-risk}
+\end{equation}
+and
+\begin{equation}
+T\Rtwo^2
+\longrightarrow
+\tr\!\left(
+(J^\star)^{-1}
+\right).
+\label{eq:sharp-euclidean-risk}
+\end{equation}
+Together with Proposition~\ref{prop:risk-lower}, this shows that
+\FB{} attains the optimal leading constant for worst-direction mean
+squared error within the stated comparison class.
+
+Finally,
+\begin{equation}
+\frac1{\gstar}
+\le
+\tr\!\left(
+(J^\star)^{-1}
+\right)
+\le
+\frac d{\gstar}.
+\end{equation}
+We claim sharp optimality for worst-direction risk, not A-optimality of
+the total Euclidean risk.
+
+Thus the theory progresses from a universal information benchmark to
+finite-sample recovery and finally to sharp asymptotic optimality in
+the hardest parameter direction.
+
+All proofs are given in Appendix~\ref{app:proofs}.
+
+\section{Experiments}
+\label{sec:experiments}
+
+We compare \textbf{Ours} with A-, D-, and E-optimal design, UCB,
+Thompson sampling, and uniform sampling. Figures report minimum true
+information and Euclidean parameter error against $mt$ additional
+queries after a 40-query D-optimal initialization; $t$ counts batch
+rounds. Curves are seed means with pointwise $\pm1.96\,\mathrm{SEM}$
+bands. Appendix~\ref{app:experiment-protocol} details the implementations.
+
+\subsection{Synthetic Experiment}
+\label{sec:synthetic-experiment}
+
+Anisotropic unit-ball pools vary in dimension, covariance decay,
+target orientation, and batch size. Each condition uses ten paired seeds.
+
+\begin{figure}[!htbp]
+  \centering
+  \includegraphics[width=\columnwidth]{synthetic_gaussian_bernoulli.pdf}
+  \caption{Synthetic pools with $d=20$, $\alpha=1.5$, a weak target,
+  and $m=10$. Columns compare Gaussian and Bernoulli responses;
+  rows show minimum information (higher is better) and parameter
+  error (lower is better). Bands summarize ten paired seeds.}
+  \label{fig:synthetic-main}
+\end{figure}
+
+\Cref{fig:synthetic-main} compares matched Gaussian and Bernoulli
+responses. At $mt=200$, Ours reduces error by $6.5\%$ and $6.0\%$
+relative to the best baseline in each family. Minimum information is
+nearly tied with the best Gaussian baseline and improves by $2.0\%$
+for Bernoulli responses. Appendix~\ref{app:synthetic-details} gives the
+selection rule; Appendix~\ref{app:synthetic-results} reports all displayed sweeps.
+
+\subsection{Empirical Experiment}
+\label{sec:empirical-experiment}
+
+We use eight OpenML covariate pools, three response families, and
+$m\in\{1,5,10,20\}$. Original labels are replaced by generated GLM
+responses; each condition uses three paired run seeds.
+
+\begin{figure}[!htbp]
+  \centering
+  \includegraphics[width=\columnwidth]{empirical_gaussian_poisson.pdf}
+  \caption{Australian covariates with $d=20$ and $m=5$.
+  Columns compare Gaussian and Poisson responses on the same pool
+  and target; rows show minimum information and parameter error,
+  as in \cref{fig:synthetic-main}. Bands summarize three paired run
+  seeds. Appendix~\ref{app:empirical-results} reports the broader grid.}
+  \label{fig:empirical-main}
+\end{figure}
+
+In \cref{fig:empirical-main}, Ours reduces Gaussian and Poisson error
+by $12.1\%$ and $4.0\%$ at $mt=200$. Information improves by $0.9\%$
+for Gaussian responses and is $0.9\%$ below the best baseline for Poisson
+responses. Each percentage compares with the best baseline on that metric.
+
+Across all 96 conditions, Ours leads on information in 48, error in 33,
+and both in 24. Both main figures show favorably selected cases;
+the broader appendix results use the same seven algorithms.
+
+\clearpage
+\subsection*{AI Use Statement}
+% TODO (authors): Extend this statement to cover any earlier AI assistance
+% with research, proofs, code, experiments, or manuscript writing.
+Generative AI tools were used to adapt the manuscript to the AISTATS 2027
+\LaTeX{} template, consolidate the bibliography, inspect existing
+experiment outputs, prepare plotting code and figures, and draft the
+experimental descriptions.
+
+\bibliographystyle{plainnat}
+\IfFileExists{AISTATS/reference_final.bib}
+  {\bibliography{AISTATS/reference_final}}
+  {\bibliography{reference_final}}
+
+\section*{Checklist}
+% TODO (authors): Select Yes, No, or Not Applicable for each official question
+% and add a section reference or brief justification where appropriate.
+
+\begin{enumerate}
+
+  \item For all models and algorithms presented, check if you include:
+  \begin{enumerate}
+    \item A clear description of the mathematical setting, assumptions, algorithm, and/or model. [Yes/No/Not Applicable]
+    \item An analysis of the properties and complexity (time, space, sample size) of any algorithm. [Yes/No/Not Applicable]
+    \item (Optional) Anonymized source code, with specification of all dependencies, including external libraries. [Yes/No/Not Applicable]
+  \end{enumerate}
+
+  \item For any theoretical claim, check if you include:
+  \begin{enumerate}
+    \item Statements of the full set of assumptions of all theoretical results. [Yes/No/Not Applicable]
+    \item Complete proofs of all theoretical results. [Yes/No/Not Applicable]
+    \item Clear explanations of any assumptions. [Yes/No/Not Applicable]
+  \end{enumerate}
+
+  \item For all figures and tables that present empirical results, check if you include:
+  \begin{enumerate}
+    \item The code, data, and instructions needed to reproduce the main experimental results (either in the supplemental material or as a URL). [Yes/No/Not Applicable]
+    \item All the training details (e.g., data splits, hyperparameters, how they were chosen). [Yes/No/Not Applicable]
+    \item A clear definition of the specific measure or statistics and error bars (e.g., with respect to the random seed after running experiments multiple times). [Yes/No/Not Applicable]
+    \item A description of the computing infrastructure used. (e.g., type of GPUs, internal cluster, or cloud provider). [Yes/No/Not Applicable]
+  \end{enumerate}
+
+  \item If you are using existing assets (e.g., code, data, models) or curating/releasing new assets, check if you include:
+  \begin{enumerate}
+    \item Citations of the creator If your work uses existing assets. [Yes/No/Not Applicable]
+    \item The license information of the assets, if applicable. [Yes/No/Not Applicable]
+    \item New assets either in the supplemental material or as a URL, if applicable. [Yes/No/Not Applicable]
+    \item Information about consent from data providers/curators. [Yes/No/Not Applicable]
+    \item Discussion of sensible content if applicable, e.g., personally identifiable information or offensive content. [Yes/No/Not Applicable]
+  \end{enumerate}
+
+  \item If you used crowdsourcing or conducted research with human subjects, check if you include:
+  \begin{enumerate}
+    \item The full text of instructions given to participants and screenshots. [Yes/No/Not Applicable]
+    \item Descriptions of potential participant risks, with links to Institutional Review Board (IRB) approvals if applicable. [Yes/No/Not Applicable]
+    \item The estimated hourly wage paid to participants and the total amount spent on participant compensation. [Yes/No/Not Applicable]
+  \end{enumerate}
+
+\end{enumerate}
+
+\clearpage
+\appendix
+\onecolumn
+\thispagestyle{empty}
+\aistatstitle{\PaperTitle\\Supplementary Materials}
+\numberwithin{equation}{section}
+\section{Additional Experiments and Details}
+\label{app:experiments}
+
+This appendix describes the finite-pool implementations used in
+\cref{sec:experiments}, states how the main panels were selected, and
+reports the prepared synthetic sweeps and empirical trajectory grids.
+The empirical main panels reappear in the Australian grids, and the
+synthetic main panels in the batch-size sweeps, alongside other conditions.
+
+\subsection{Evaluation Protocol and Implementation}
+\label{app:experiment-protocol}
+
+\paragraph{Metrics, initialization, and budget.}
+Every method starts with the same label-free, greedy D-optimal selection
+of $n_0=40$ inputs, using unit curvature for initialization. Responses
+are then generated and a ridge estimate is fitted with $\rho=1$.
+We retain the manuscript's batch-round index $t$: $mt$ is the number
+of additional queries and $n_0+mt$ is the total response count.
+The initial information includes the ridge term and the warm-start
+queries $x_{0,i}$. At each completed batch boundary, we record
+\begin{equation}
+  \begin{aligned}
+    V_0^\star&=I+\sum_{i=1}^{n_0}
+      w_{\theta^\star}(x_{0,i})x_{0,i}x_{0,i}^\top,\qquad
+    V_t^\star=V_0^\star+\sum_{s=1}^t G_{\theta^\star}(\mathcal B_s),\\
+    I_t&=\lambda_{\min}(V_t^\star),\qquad
+    e_t=\norm{\thetahat_t-\theta^\star}_2.
+  \end{aligned}
+  \label{eq:experimental-metrics}
+\end{equation}
+Here $\thetahat_t$ is fitted to all $n_0+mt$ observed responses.
+The true parameter is used to evaluate $I_t$; acquisition decisions
+use the current fitted parameter. Runs continue to 400 additional
+responses. All figures display the same prefix $0\le mt\le200$.
+Values are recorded after $t=0,1,2,\ldots$ completed rounds and plotted
+at $mt=0,m,2m,\ldots$; lines connect these measurements.
+
+\paragraph{Implementation of Ours.}
+The archived results reported in this section use the implementation
+below, not the prescribed-budget calibration in \eqref{eq:temperature}.
+The label Ours and its blue line are fixed across all response families
+and batch sizes. For $m=1$, the implementation selects the largest value of
+$w_{\widehat\theta}(x)(x^\top v_{\min})^2$, where $v_{\min}$ is one
+minimum-eigenvalue eigenvector of the plug-in information matrix.
+For $m>1$, it uses the Gibbs score in \eqref{eq:score}. Its fitted parameter
+is frozen during a batch, and its temporary information matrix is
+updated after each selected input. The archived runs use
+\begin{equation}
+  \tau=\max\!\left\{10^{-8},\ R\sqrt{\frac{m}{8\log d}}\right\}.
+  \label{eq:experimental-temperature}
+\end{equation}
+For Gaussian and Bernoulli responses on the unit-radius pools,
+$R=1$ and $R=1/4$, respectively. For Poisson responses, $R$ is the
+largest candidate value of
+$w_{\widehat\theta}(x)\norm{x}_2^2$, recomputed over the remaining
+candidates within a batch. The temperature multiplier is one.
+
+Inputs cannot be repeated within a batch.
+Synthetic pools permit reuse across batches; empirical
+pools are sampled without replacement.
+
+\paragraph{Relation to the theoretical setting.}
+These runs use finite candidate pools, range-based soft temperatures,
+and unconstrained ridge fits. The theoretical analysis uses maximization
+over the full ball, the growing temperature in \cref{alg:fb}, and a
+compact parameter constraint. Poisson responses also extend beyond
+the global sub-Gaussian noise assumption. The experiments therefore
+assess the information-balancing mechanism under the stated practical
+choices; their endpoint improvements are finite-budget empirical results.
+
+\paragraph{Optimization and comparators.}
+Gaussian ridge regression is solved directly. Logistic and Poisson
+fits use damped Newton updates with at most 80 iterations and tolerance
+$10^{-8}$. Acquisition curvature clips linear predictors to $[-30,30]$
+and uses floors of $10^{-10}$ for logistic and $10^{-12}$ for Poisson
+curvature. Poisson fitting also guards the exponent at 30. The
+generated Poisson predictors lie within $[-8.5,7.5]$, so exponent
+clipping is inactive for the generated responses and true-information
+metric. Acquisition considers at most 2,000 available candidates per
+batch, selected using a method-independent priority for shared remaining
+rows. Common comparators are greedy A-, D-, and E-optimal design,
+UCB/GLM-UCB, Thompson sampling, and uniform random sampling. E-optimal
+design evaluates the one-step minimum eigenvalue on all candidates when
+there are at most 400; otherwise it uses the top 256 hard-score candidates
+plus 32 random candidates. The same six baselines and Ours appear in
+every panel, for all response families and batch sizes. All methods
+use the same feedback protocol and initialization within a condition.
+
+\paragraph{Seeds and uncertainty.}
+Synthetic conditions use seeds $0,\ldots,9$; empirical conditions use
+seeds $0,1,2$. Curves are pointwise arithmetic means and shading is
+mean $\pm1.96\,\mathrm{SEM}$. These are descriptive uncertainty bands,
+with only three run seeds in the empirical setting. Response
+randomness is paired across methods by observation index for synthetic
+pools and by row identity for empirical pools. Within each empirical
+dataset, the feature preprocessing and target are fixed across runs.
+Run seeds also control initialization and acquisition randomization;
+these bands do not measure uncertainty over datasets.
+
+\subsection{Empirical Pools and Main-Panel Selection}
+\label{app:empirical-selection}
+
+\paragraph{Real covariates with generated responses.}
+The eight processed OpenML pools are listed in
+\cref{tab:empirical-universe}. Original labels are discarded. Numeric
+columns undergo median imputation and standardization; categorical
+columns use most-frequent imputation and bounded one-hot encoding.
+PCA for dense matrices or truncated SVD for sparse matrices reduces
+the feature representation, after which reduced coordinates are
+standardized and every row is projected to the unit ball. The
+preprocessing seed is zero. The table reports the actual processed
+row counts and dimensions in the completed-run metadata.
+
+The target follows a minimum-eigenvalue eigenvector of the empirical
+second-moment matrix $X^\top X/|X|$ and is scaled toward unit predictor standard deviation,
+with Euclidean norm capped at eight. Responses have unit-variance
+Gaussian noise, the Bernoulli-logistic link, or Poisson mean
+$\exp(-0.5+x^\top\theta^\star)$. Each dataset is evaluated under all
+three families and $m\in\{1,5,10,20\}$, yielding 96 conditions.
+
+\begin{table}[htbp]
+\centering
+\begin{tabular}{lrrrrrr}
+\toprule
+Dataset & OpenML ID & $d$ & Rows & Info. & Error & Both\\
+\midrule
+Australian      & 40981 & 20 &   690 &  8 & 8 & 5\\
+PhishingWebsites &  4534 & 20 & 10000 & 10 & 2 & 2\\
+adult           &  1590 & 20 & 10000 &  6 & 5 & 4\\
+bank-marketing  &  1461 & 20 & 10000 &  5 & 3 & 2\\
+credit-g        &    31 & 20 &  1000 &  9 & 5 & 5\\
+eeg-eye-state   &  1471 & 12 & 10000 &  1 & 0 & 0\\
+spambase        &    44 & 20 &  4601 &  9 & 7 & 6\\
+splice          &    46 & 20 &  3190 &  0 & 3 & 0\\
+\midrule
+All settings    &       &    &       & 48 & 33 & 24\\
+\bottomrule
+\end{tabular}
+\caption{Empirical selection universe. Each dataset contributes 12
+conditions. The last three columns count strict improvements in
+three-seed endpoint means over the strongest of the six common
+comparators at $mt=200$, for information, error, and both metrics.
+Ours uses the implementation specified for each batch size above.
+All panels use this same comparison set.}
+\label{tab:empirical-universe}
+\end{table}
+
+\paragraph{Selection rule.}
+We pair a Gaussian condition with a Bernoulli or Poisson condition on
+the same dataset at the same batch size $m\in\{5,10,20\}$, giving 48
+candidate pairs. Let $\overline I_{f,\mathrm{Ours}}$ and
+$\overline e_{f,\mathrm{Ours}}$ denote mean endpoints at $mt=200$ in
+family $f$, and let $\mathcal C$ contain the six common design,
+bandit, and random comparators. We retain pairs whose error mean is
+smaller than every member of $\mathcal C$ in both families, then maximize
+\begin{equation}
+  S_{\mathrm{pair}}=\sqrt{S_{\mathrm{Gaussian}}S_f},\qquad
+  S_f=\sqrt{
+    \frac{\overline I_{f,\mathrm{Ours}}}
+         {\max_{c\in\mathcal C}\overline I_{f,c}}
+    \frac{\min_{c\in\mathcal C}\overline e_{f,c}}
+         {\overline e_{f,\mathrm{Ours}}}}.
+  \label{eq:empirical-selection}
+\end{equation}
+This selects Australian with Gaussian and Poisson responses at $m=5$.
+Information dominance is not required by this rule. All runs enter
+the means, and the main figure displays Ours and the same six common
+comparators in both families. The appendix uses the identical algorithm
+set and reports both information and parameter error.
+
+For Gaussian responses, Ours has
+$(\overline I,\overline e)=(12.0704,1.1090)$; the strongest common
+information and error comparators are A-optimal design ($11.9585$)
+and D-optimal design ($1.2616$), respectively. For Poisson responses,
+Ours gives $(4.6865,1.7021)$; the corresponding comparators are
+E-optimal design ($4.7313$) and A-optimal design ($1.7728$).
+
+Across all 96 conditions, the median relative information gain over the
+best common comparator is approximately zero, and median relative
+error reduction is $-1.33\%$. The favorable main panels therefore
+illustrate conditions where information balancing helps; they do not
+summarize typical gains over the entire empirical grid.
+The following trajectory pages retain Australian and credit-g from
+the prepared report and show every response family and batch size for
+those two datasets. \Cref{tab:empirical-universe} covers all eight pools.
+
+\subsection{Synthetic Construction and Sweeps}
+\label{app:synthetic-details}
+
+For each seed we draw 3,000 anisotropic Gaussian candidates with
+coordinate standard deviations $j^{-\alpha/2}$. Eight percent are
+replaced by directions supported on the final four coordinates. Rows
+are projected to the Euclidean unit ball, and the $2d$ signed coordinate
+anchors are appended. The resulting pool has $3000+2d$ inputs.
+
+Let $u_{\min}$ and $u_{\max}$ be eigenvectors of the empirical second-moment
+matrix $X^\top X/|X|$ for its smallest and largest eigenvalues.
+Weak and strong targets use these directions;
+a random target uses an independent normalized Gaussian vector. For
+each direction $u$, we set
+\begin{equation}
+  \theta^\star=cu,\qquad
+  c=\min\{\operatorname{std}(Xu)^{-1},8\}.
+  \label{eq:experimental-target}
+\end{equation}
+The pool is regenerated across synthetic seeds, so the eigenvector-aligned
+targets also vary across seeds. Gaussian responses have noise standard
+deviation one; Bernoulli responses use the logistic link. The additional
+Poisson comparison uses the offset specified above.
+
+The central condition is $d=20$, $\alpha=1.5$, and a weak target.
+The prepared Gaussian and logistic sweeps vary one factor at a time:
+target orientation (weak, random, strong), dimension ($10,20,40$),
+covariance decay ($0.5,1.5,3$), and batch size ($1,5,10,20$).
+The batch-size figures display all four values $m=1,5,10,20$.
+Batch-size panels hold the central geometry fixed; additional batched
+geometry runs remain in the experiment archive.
+The Poisson comparison contains the central condition with $m=1$ and
+$m=10$. All figures compare the same seven algorithms.
+
+\paragraph{Synthetic main-panel selection.}
+The displayed slices contain 12 matched pairs: ten Gaussian/Bernoulli
+pairs and two Gaussian/Poisson pairs. Each pair fixes the geometry,
+target construction, and batch size. We retain pairs in which Ours
+improves both endpoint metrics over every baseline in both families,
+then maximize the smaller of the two relative error reductions.
+All ten seeds enter the means. This selects Gaussian and Bernoulli
+responses in the central setting with $m=10$ for
+\cref{fig:synthetic-main}. At $mt=200$, information gains are $0.05\%$
+and $1.95\%$, and error reductions are $6.50\%$ and $5.98\%$,
+respectively. This is a favorable illustrative pair selected from the
+displayed slices; the appendix also includes conditions with smaller
+or negative gains.
+
+\paragraph{Reproducing the displayed figures.}
+The experiment archive retains each run's configuration, completion
+marker, metadata, and trajectory. The accompanying
+\texttt{scripts/prepare\_aistats\_figures.py} regenerates these panels
+from the completed trajectories. Its figure manifest records source
+files, hashes, seed and checkpoint checks, selected conditions, and
+endpoint summaries. The 96-condition comparison uses 2,016 completed
+trajectories (seven methods including the evaluated variant, with
+three seeds per condition).
+
+\clearpage
+\subsection{Synthetic Results}
+\label{app:synthetic-results}
+
+% Each source PDF is one metric panel with its own internal legend.
+% Change these subfigure widths or row breaks to rearrange the LaTeX grids.
+\newcommand{\experimentpanel}[3][0.485]{%
+  \begin{subfigure}[t]{#1\linewidth}%
+    \centering
+    \includegraphics[width=\linewidth]{#2}%
+    \caption{#3}%
+  \end{subfigure}%
+}
+
+\begin{figure}[H]
+  \centering
+  \experimentpanel{synthetic_gaussian_d20_alpha1.5_weak_m1_lambda_min.pdf}{Weak target: minimum information.}\hfill
+  \experimentpanel{synthetic_gaussian_d20_alpha1.5_weak_m1_l2_error.pdf}{Weak target: parameter error.}
+  \par\vspace{2pt}
+  \experimentpanel{synthetic_gaussian_d20_alpha1.5_random_m1_lambda_min.pdf}{Random target: minimum information.}\hfill
+  \experimentpanel{synthetic_gaussian_d20_alpha1.5_random_m1_l2_error.pdf}{Random target: parameter error.}
+  \par\vspace{2pt}
+  \experimentpanel{synthetic_gaussian_d20_alpha1.5_strong_m1_lambda_min.pdf}{Strong target: minimum information.}\hfill
+  \experimentpanel{synthetic_gaussian_d20_alpha1.5_strong_m1_l2_error.pdf}{Strong target: parameter error.}
+  \caption{Gaussian target-orientation sweep at $d=20$, $\alpha=1.5$, and $m=1$. Each row changes the target direction; columns show information and parameter error. Curves summarize ten seeds.}
+  \label{fig:synthetic-theta-gaussian}
+\end{figure}
+\clearpage
+\begin{figure}[H]
+  \centering
+  \experimentpanel{synthetic_logistic_d20_alpha1.5_weak_m1_lambda_min.pdf}{Weak target: minimum information.}\hfill
+  \experimentpanel{synthetic_logistic_d20_alpha1.5_weak_m1_l2_error.pdf}{Weak target: parameter error.}
+  \par\vspace{2pt}
+  \experimentpanel{synthetic_logistic_d20_alpha1.5_random_m1_lambda_min.pdf}{Random target: minimum information.}\hfill
+  \experimentpanel{synthetic_logistic_d20_alpha1.5_random_m1_l2_error.pdf}{Random target: parameter error.}
+  \par\vspace{2pt}
+  \experimentpanel{synthetic_logistic_d20_alpha1.5_strong_m1_lambda_min.pdf}{Strong target: minimum information.}\hfill
+  \experimentpanel{synthetic_logistic_d20_alpha1.5_strong_m1_l2_error.pdf}{Strong target: parameter error.}
+  \caption{Bernoulli-logistic target-orientation sweep at $d=20$, $\alpha=1.5$, and $m=1$. Each row changes the target direction; columns show information and parameter error. Curves summarize ten seeds.}
+  \label{fig:synthetic-theta-logistic}
+\end{figure}
+\clearpage
+\begin{figure}[H]
+  \centering
+  \experimentpanel{synthetic_gaussian_d10_alpha1.5_weak_m1_lambda_min.pdf}{$d=10$: minimum information.}\hfill
+  \experimentpanel{synthetic_gaussian_d10_alpha1.5_weak_m1_l2_error.pdf}{$d=10$: parameter error.}
+  \par\vspace{2pt}
+  \experimentpanel{synthetic_gaussian_d20_alpha1.5_weak_m1_lambda_min.pdf}{$d=20$: minimum information.}\hfill
+  \experimentpanel{synthetic_gaussian_d20_alpha1.5_weak_m1_l2_error.pdf}{$d=20$: parameter error.}
+  \par\vspace{2pt}
+  \experimentpanel{synthetic_gaussian_d40_alpha1.5_weak_m1_lambda_min.pdf}{$d=40$: minimum information.}\hfill
+  \experimentpanel{synthetic_gaussian_d40_alpha1.5_weak_m1_l2_error.pdf}{$d=40$: parameter error.}
+  \caption{Gaussian dimension sweep, with covariance decay $\alpha=1.5$, weak targets, and $m=1$. Information and error are compared within each dimension using ten seeds.}
+  \label{fig:synthetic-dimension-gaussian}
+\end{figure}
+\clearpage
+\begin{figure}[H]
+  \centering
+  \experimentpanel{synthetic_logistic_d10_alpha1.5_weak_m1_lambda_min.pdf}{$d=10$: minimum information.}\hfill
+  \experimentpanel{synthetic_logistic_d10_alpha1.5_weak_m1_l2_error.pdf}{$d=10$: parameter error.}
+  \par\vspace{2pt}
+  \experimentpanel{synthetic_logistic_d20_alpha1.5_weak_m1_lambda_min.pdf}{$d=20$: minimum information.}\hfill
+  \experimentpanel{synthetic_logistic_d20_alpha1.5_weak_m1_l2_error.pdf}{$d=20$: parameter error.}
+  \par\vspace{2pt}
+  \experimentpanel{synthetic_logistic_d40_alpha1.5_weak_m1_lambda_min.pdf}{$d=40$: minimum information.}\hfill
+  \experimentpanel{synthetic_logistic_d40_alpha1.5_weak_m1_l2_error.pdf}{$d=40$: parameter error.}
+  \caption{Bernoulli-logistic dimension sweep, with covariance decay $\alpha=1.5$, weak targets, and $m=1$. Information and error are compared within each dimension using ten seeds.}
+  \label{fig:synthetic-dimension-logistic}
+\end{figure}
+\clearpage
+\begin{figure}[H]
+  \centering
+  \experimentpanel{synthetic_gaussian_d20_alpha0.5_weak_m1_lambda_min.pdf}{$\alpha=0.5$: minimum information.}\hfill
+  \experimentpanel{synthetic_gaussian_d20_alpha0.5_weak_m1_l2_error.pdf}{$\alpha=0.5$: parameter error.}
+  \par\vspace{2pt}
+  \experimentpanel{synthetic_gaussian_d20_alpha1.5_weak_m1_lambda_min.pdf}{$\alpha=1.5$: minimum information.}\hfill
+  \experimentpanel{synthetic_gaussian_d20_alpha1.5_weak_m1_l2_error.pdf}{$\alpha=1.5$: parameter error.}
+  \par\vspace{2pt}
+  \experimentpanel{synthetic_gaussian_d20_alpha3_weak_m1_lambda_min.pdf}{$\alpha=3$: minimum information.}\hfill
+  \experimentpanel{synthetic_gaussian_d20_alpha3_weak_m1_l2_error.pdf}{$\alpha=3$: parameter error.}
+  \caption{Gaussian covariance-decay sweep at $d=20$ with weak targets and $m=1$. Larger $\alpha$ gives more unequal coordinate scales before projection. Each condition uses ten seeds.}
+  \label{fig:synthetic-covariance-gaussian}
+\end{figure}
+\clearpage
+\begin{figure}[H]
+  \centering
+  \experimentpanel{synthetic_logistic_d20_alpha0.5_weak_m1_lambda_min.pdf}{$\alpha=0.5$: minimum information.}\hfill
+  \experimentpanel{synthetic_logistic_d20_alpha0.5_weak_m1_l2_error.pdf}{$\alpha=0.5$: parameter error.}
+  \par\vspace{2pt}
+  \experimentpanel{synthetic_logistic_d20_alpha1.5_weak_m1_lambda_min.pdf}{$\alpha=1.5$: minimum information.}\hfill
+  \experimentpanel{synthetic_logistic_d20_alpha1.5_weak_m1_l2_error.pdf}{$\alpha=1.5$: parameter error.}
+  \par\vspace{2pt}
+  \experimentpanel{synthetic_logistic_d20_alpha3_weak_m1_lambda_min.pdf}{$\alpha=3$: minimum information.}\hfill
+  \experimentpanel{synthetic_logistic_d20_alpha3_weak_m1_l2_error.pdf}{$\alpha=3$: parameter error.}
+  \caption{Bernoulli-logistic covariance-decay sweep at $d=20$ with weak targets and $m=1$. Larger $\alpha$ gives more unequal coordinate scales before projection. Each condition uses ten seeds.}
+  \label{fig:synthetic-covariance-logistic}
+\end{figure}
+\clearpage
+\begin{figure}[H]
+  \centering
+  \experimentpanel[0.465]{synthetic_gaussian_d20_alpha1.5_weak_m1_lambda_min.pdf}{$m=1$: minimum information.}\hfill
+  \experimentpanel[0.465]{synthetic_gaussian_d20_alpha1.5_weak_m1_l2_error.pdf}{$m=1$: parameter error.}
+  \par\vspace{2pt}
+  \experimentpanel[0.465]{synthetic_gaussian_d20_alpha1.5_weak_m5_lambda_min.pdf}{$m=5$: minimum information.}\hfill
+  \experimentpanel[0.465]{synthetic_gaussian_d20_alpha1.5_weak_m5_l2_error.pdf}{$m=5$: parameter error.}
+  \par\vspace{2pt}
+  \experimentpanel[0.465]{synthetic_gaussian_d20_alpha1.5_weak_m10_lambda_min.pdf}{$m=10$: minimum information.}\hfill
+  \experimentpanel[0.465]{synthetic_gaussian_d20_alpha1.5_weak_m10_l2_error.pdf}{$m=10$: parameter error.}
+  \par\vspace{2pt}
+  \experimentpanel[0.465]{synthetic_gaussian_d20_alpha1.5_weak_m20_lambda_min.pdf}{$m=20$: minimum information.}\hfill
+  \experimentpanel[0.465]{synthetic_gaussian_d20_alpha1.5_weak_m20_l2_error.pdf}{$m=20$: parameter error.}
+  \caption{Gaussian batch-size sweep at the central geometry. All panels use the same query budget $mt$, and each curve summarizes ten seeds. Ours has the same label and color at every batch size; measurements follow completed batches. The $m=10$ row reproduces the corresponding family in \cref{fig:synthetic-main}.}
+  \label{fig:synthetic-batch-gaussian}
+\end{figure}
+\clearpage
+\begin{figure}[H]
+  \centering
+  \experimentpanel[0.465]{synthetic_logistic_d20_alpha1.5_weak_m1_lambda_min.pdf}{$m=1$: minimum information.}\hfill
+  \experimentpanel[0.465]{synthetic_logistic_d20_alpha1.5_weak_m1_l2_error.pdf}{$m=1$: parameter error.}
+  \par\vspace{2pt}
+  \experimentpanel[0.465]{synthetic_logistic_d20_alpha1.5_weak_m5_lambda_min.pdf}{$m=5$: minimum information.}\hfill
+  \experimentpanel[0.465]{synthetic_logistic_d20_alpha1.5_weak_m5_l2_error.pdf}{$m=5$: parameter error.}
+  \par\vspace{2pt}
+  \experimentpanel[0.465]{synthetic_logistic_d20_alpha1.5_weak_m10_lambda_min.pdf}{$m=10$: minimum information.}\hfill
+  \experimentpanel[0.465]{synthetic_logistic_d20_alpha1.5_weak_m10_l2_error.pdf}{$m=10$: parameter error.}
+  \par\vspace{2pt}
+  \experimentpanel[0.465]{synthetic_logistic_d20_alpha1.5_weak_m20_lambda_min.pdf}{$m=20$: minimum information.}\hfill
+  \experimentpanel[0.465]{synthetic_logistic_d20_alpha1.5_weak_m20_l2_error.pdf}{$m=20$: parameter error.}
+  \caption{Bernoulli-logistic batch-size sweep at the central geometry. All panels use the same query budget $mt$, and each curve summarizes ten seeds. Ours has the same label and color at every batch size; measurements follow completed batches. The $m=10$ row reproduces the corresponding family in \cref{fig:synthetic-main}.}
+  \label{fig:synthetic-batch-logistic}
+\end{figure}
+\clearpage
+\begin{figure}[H]
+  \centering
+  \experimentpanel{synthetic_poisson_m1_lambda_min.pdf}{$m=1$: minimum information.}\hfill
+  \experimentpanel{synthetic_poisson_m1_l2_error.pdf}{$m=1$: parameter error.}
+  \par\vspace{2pt}
+  \experimentpanel{synthetic_poisson_m10_lambda_min.pdf}{$m=10$: minimum information.}\hfill
+  \experimentpanel{synthetic_poisson_m10_l2_error.pdf}{$m=10$: parameter error.}
+  \caption{Poisson responses in the central synthetic setting, with $m=1$ and $m=10$. The batched implementation uses the temperature in \eqref{eq:experimental-temperature}. Each condition uses ten seeds.}
+  \label{fig:synthetic-poisson}
+\end{figure}
+\clearpage
+\subsection{Empirical Results}
+\label{app:empirical-results}
+
+\begin{figure}[H]
+  \centering
+  \experimentpanel{empirical_Australian_gaussian_m1_lambda_min.pdf}{Gaussian: minimum information.}\hfill
+  \experimentpanel{empirical_Australian_gaussian_m1_l2_error.pdf}{Gaussian: parameter error.}
+  \par\vspace{2pt}
+  \experimentpanel{empirical_Australian_logistic_m1_lambda_min.pdf}{Bernoulli: minimum information.}\hfill
+  \experimentpanel{empirical_Australian_logistic_m1_l2_error.pdf}{Bernoulli: parameter error.}
+  \par\vspace{2pt}
+  \experimentpanel{empirical_Australian_poisson_m1_lambda_min.pdf}{Poisson: minimum information.}\hfill
+  \experimentpanel{empirical_Australian_poisson_m1_l2_error.pdf}{Poisson: parameter error.}
+  \caption{Australian covariates with $m=1$. Rows use Gaussian, Bernoulli, and Poisson responses on the same feature pool and weak target; columns show minimum information and parameter error. Curves summarize three paired run seeds.}
+  \label{fig:empirical-australian-1}
+\end{figure}
+\clearpage
+\begin{figure}[H]
+  \centering
+  \experimentpanel{empirical_Australian_gaussian_m5_lambda_min.pdf}{Gaussian: minimum information.}\hfill
+  \experimentpanel{empirical_Australian_gaussian_m5_l2_error.pdf}{Gaussian: parameter error.}
+  \par\vspace{2pt}
+  \experimentpanel{empirical_Australian_logistic_m5_lambda_min.pdf}{Bernoulli: minimum information.}\hfill
+  \experimentpanel{empirical_Australian_logistic_m5_l2_error.pdf}{Bernoulli: parameter error.}
+  \par\vspace{2pt}
+  \experimentpanel{empirical_Australian_poisson_m5_lambda_min.pdf}{Poisson: minimum information.}\hfill
+  \experimentpanel{empirical_Australian_poisson_m5_l2_error.pdf}{Poisson: parameter error.}
+  \caption{Australian covariates with $m=5$. Rows use Gaussian, Bernoulli, and Poisson responses on the same feature pool and weak target; columns show minimum information and parameter error. Curves summarize three paired run seeds. The Gaussian and Poisson rows reproduce the four panels of \cref{fig:empirical-main}.}
+  \label{fig:empirical-australian-5}
+\end{figure}
+\clearpage
+\begin{figure}[H]
+  \centering
+  \experimentpanel{empirical_Australian_gaussian_m10_lambda_min.pdf}{Gaussian: minimum information.}\hfill
+  \experimentpanel{empirical_Australian_gaussian_m10_l2_error.pdf}{Gaussian: parameter error.}
+  \par\vspace{2pt}
+  \experimentpanel{empirical_Australian_logistic_m10_lambda_min.pdf}{Bernoulli: minimum information.}\hfill
+  \experimentpanel{empirical_Australian_logistic_m10_l2_error.pdf}{Bernoulli: parameter error.}
+  \par\vspace{2pt}
+  \experimentpanel{empirical_Australian_poisson_m10_lambda_min.pdf}{Poisson: minimum information.}\hfill
+  \experimentpanel{empirical_Australian_poisson_m10_l2_error.pdf}{Poisson: parameter error.}
+  \caption{Australian covariates with $m=10$. Rows use Gaussian, Bernoulli, and Poisson responses on the same feature pool and weak target; columns show minimum information and parameter error. Curves summarize three paired run seeds.}
+  \label{fig:empirical-australian-10}
+\end{figure}
+\clearpage
+\begin{figure}[H]
+  \centering
+  \experimentpanel{empirical_Australian_gaussian_m20_lambda_min.pdf}{Gaussian: minimum information.}\hfill
+  \experimentpanel{empirical_Australian_gaussian_m20_l2_error.pdf}{Gaussian: parameter error.}
+  \par\vspace{2pt}
+  \experimentpanel{empirical_Australian_logistic_m20_lambda_min.pdf}{Bernoulli: minimum information.}\hfill
+  \experimentpanel{empirical_Australian_logistic_m20_l2_error.pdf}{Bernoulli: parameter error.}
+  \par\vspace{2pt}
+  \experimentpanel{empirical_Australian_poisson_m20_lambda_min.pdf}{Poisson: minimum information.}\hfill
+  \experimentpanel{empirical_Australian_poisson_m20_l2_error.pdf}{Poisson: parameter error.}
+  \caption{Australian covariates with $m=20$. Rows use Gaussian, Bernoulli, and Poisson responses on the same feature pool and weak target; columns show minimum information and parameter error. Curves summarize three paired run seeds.}
+  \label{fig:empirical-australian-20}
+\end{figure}
+\clearpage
+\begin{figure}[H]
+  \centering
+  \experimentpanel{empirical_credit-g_gaussian_m1_lambda_min.pdf}{Gaussian: minimum information.}\hfill
+  \experimentpanel{empirical_credit-g_gaussian_m1_l2_error.pdf}{Gaussian: parameter error.}
+  \par\vspace{2pt}
+  \experimentpanel{empirical_credit-g_logistic_m1_lambda_min.pdf}{Bernoulli: minimum information.}\hfill
+  \experimentpanel{empirical_credit-g_logistic_m1_l2_error.pdf}{Bernoulli: parameter error.}
+  \par\vspace{2pt}
+  \experimentpanel{empirical_credit-g_poisson_m1_lambda_min.pdf}{Poisson: minimum information.}\hfill
+  \experimentpanel{empirical_credit-g_poisson_m1_l2_error.pdf}{Poisson: parameter error.}
+  \caption{credit-g covariates with $m=1$. Rows use Gaussian, Bernoulli, and Poisson responses on the same feature pool and weak target; columns show minimum information and parameter error. Curves summarize three paired run seeds.}
+  \label{fig:empirical-creditg-1}
+\end{figure}
+\clearpage
+\begin{figure}[H]
+  \centering
+  \experimentpanel{empirical_credit-g_gaussian_m5_lambda_min.pdf}{Gaussian: minimum information.}\hfill
+  \experimentpanel{empirical_credit-g_gaussian_m5_l2_error.pdf}{Gaussian: parameter error.}
+  \par\vspace{2pt}
+  \experimentpanel{empirical_credit-g_logistic_m5_lambda_min.pdf}{Bernoulli: minimum information.}\hfill
+  \experimentpanel{empirical_credit-g_logistic_m5_l2_error.pdf}{Bernoulli: parameter error.}
+  \par\vspace{2pt}
+  \experimentpanel{empirical_credit-g_poisson_m5_lambda_min.pdf}{Poisson: minimum information.}\hfill
+  \experimentpanel{empirical_credit-g_poisson_m5_l2_error.pdf}{Poisson: parameter error.}
+  \caption{credit-g covariates with $m=5$. Rows use Gaussian, Bernoulli, and Poisson responses on the same feature pool and weak target; columns show minimum information and parameter error. Curves summarize three paired run seeds.}
+  \label{fig:empirical-creditg-5}
+\end{figure}
+\clearpage
+\begin{figure}[H]
+  \centering
+  \experimentpanel{empirical_credit-g_gaussian_m10_lambda_min.pdf}{Gaussian: minimum information.}\hfill
+  \experimentpanel{empirical_credit-g_gaussian_m10_l2_error.pdf}{Gaussian: parameter error.}
+  \par\vspace{2pt}
+  \experimentpanel{empirical_credit-g_logistic_m10_lambda_min.pdf}{Bernoulli: minimum information.}\hfill
+  \experimentpanel{empirical_credit-g_logistic_m10_l2_error.pdf}{Bernoulli: parameter error.}
+  \par\vspace{2pt}
+  \experimentpanel{empirical_credit-g_poisson_m10_lambda_min.pdf}{Poisson: minimum information.}\hfill
+  \experimentpanel{empirical_credit-g_poisson_m10_l2_error.pdf}{Poisson: parameter error.}
+  \caption{credit-g covariates with $m=10$. Rows use Gaussian, Bernoulli, and Poisson responses on the same feature pool and weak target; columns show minimum information and parameter error. Curves summarize three paired run seeds.}
+  \label{fig:empirical-creditg-10}
+\end{figure}
+\clearpage
+\begin{figure}[H]
+  \centering
+  \experimentpanel{empirical_credit-g_gaussian_m20_lambda_min.pdf}{Gaussian: minimum information.}\hfill
+  \experimentpanel{empirical_credit-g_gaussian_m20_l2_error.pdf}{Gaussian: parameter error.}
+  \par\vspace{2pt}
+  \experimentpanel{empirical_credit-g_logistic_m20_lambda_min.pdf}{Bernoulli: minimum information.}\hfill
+  \experimentpanel{empirical_credit-g_logistic_m20_l2_error.pdf}{Bernoulli: parameter error.}
+  \par\vspace{2pt}
+  \experimentpanel{empirical_credit-g_poisson_m20_lambda_min.pdf}{Poisson: minimum information.}\hfill
+  \experimentpanel{empirical_credit-g_poisson_m20_l2_error.pdf}{Poisson: parameter error.}
+  \caption{credit-g covariates with $m=20$. Rows use Gaussian, Bernoulli, and Poisson responses on the same feature pool and weak target; columns show minimum information and parameter error. Curves summarize three paired run seeds.}
+  \label{fig:empirical-creditg-20}
+\end{figure}
+\clearpage
+
+\section{Theoretical Proofs and Details}
+\label{app:proofs}
+
+The proof order is non-circular: deterministic excitation is established
+for arbitrary fitted parameters, then concentration gives preliminary
+localization, and only then is optimal information growth proved.
+Mean-square efficiency is proved last. Throughout this appendix,
+$N=mT$ denotes a completed response count; a general prefix length
+$n$ need not be a multiple of $m$.
+For completed counts $N=mT$, we write $\varepsilon_{N,m}(\delta)$
+and $\beta_N(\delta)$ for $\varepsilon_{m,T}(\delta)$ and
+$\beta_{m,T}(\delta)$ in \eqref{eq:rate-error} and~\eqref{eq:confidence-radius},
+respectively. This changes notation only, not either bound.
+
+\subsection{Details of Notation and Adaptive Scores}
+\label{app:notation}
+
+\subsubsection*{Indices, matrices, and constants.}
+The flat index $i=(t-1)m+j$ identifies query $j$ in batch $t$; set
+$x_i=x_{t,j}$, $Y_i=Y_{t,j}$, and
+$\xi_i=Y_i-\mu_{\theta^\star}(x_i)$. Define the regularized input
+matrix, the true information, and the accumulated likelihood score by
+\begin{equation}
+H_n=\rho I+\sum_{i=1}^n x_ix_i^\top,\qquad
+Z_n=\rho I+\sum_{i=1}^nG_{\theta^\star}(x_i),\qquad
+U_n=\sum_{i=1}^n x_i\xi_i.
+\label{eq:app-states}
+\end{equation}
+Empty sums are zero, so $H_0=Z_0=\rho I$ and $U_0=0$.
+At a completed round, $Z_{mt}=V_t^\star$. For a positive definite
+matrix $H$, write $\norm{v}_H=(v^\top Hv)^{1/2}$.
+The notation $A_1\preceq A_2$ means that $A_2-A_1$ is positive
+semidefinite. Define the comparison and sensitivity constants
+\begin{equation}
+a_0=\min\{1,\underline w\},\quad
+b_0=\max\{1,\overline w\},\quad
+B=\overline wL^2,\quad C_F=L_AL^3,\quad
+\gamma_0=\underline wL^2/d.
+\label{eq:app-constants}
+\end{equation}
+For every $\theta\in\Theta$, the curvature bounds imply
+\begin{align}
+\rho I+\sum_{i=1}^nG_\theta(x_i)-a_0H_n
+&=(1-a_0)\rho I+
+\sum_{i=1}^n\big(w_\theta(x_i)-a_0\big)x_ix_i^\top\succeq0,\notag\\
+b_0H_n-\rho I-\sum_{i=1}^nG_\theta(x_i)
+&=(b_0-1)\rho I+
+\sum_{i=1}^n\big(b_0-w_\theta(x_i)\big)x_ix_i^\top\succeq0.
+\label{eq:app-matrix-comparison-proof}
+\end{align}
+In particular,
+\begin{equation}
+a_0H_n\preceq\rho I+\sum_{i=1}^nG_\theta(x_i)
+\preceq b_0H_n,\qquad
+0\preceq G_\theta(x)\preceq BI.
+\label{eq:app-comparability}
+\end{equation}
+Convexity of $\Theta$ permits the same comparison for curvature
+integrated along a segment between feasible parameters.
+Since $\norm{xx^\top}_{\op}=\norm{x}_2^2$, information sensitivity is
+\begin{align}
+\norm{G_\theta(x)-G_{\theta'}(x)}_{\op}
+&=|A''(x^\top\theta)-A''(x^\top\theta')|\norm{x}_2^2\notag\\
+&\le L_A|x^\top(\theta-\theta')|\norm{x}_2^2
+\le L_A\norm{x}_2^3\norm{\theta-\theta'}_2
+\le C_F\norm{\theta-\theta'}_2.
+\label{eq:app-fisher-lipschitz}
+\end{align}
+Constants in finite-time bounds depend only on
+$d,L,S,\rho,\underline w,\overline w,L_A,\sigma,\tau_0$.
+A dependence on $\gamma^\star$ can be replaced by its lower bound
+$\gamma_0$ when an inverse power is used. Fourth-moment constants in
+the fixed-$m$ efficiency proof may additionally depend on $m$.
+
+\subsubsection*{Predictability without within-batch feedback.}
+For the analysis only, reveal responses in flat-index order. Let
+$\mathscr F_{i-1}$ contain the revealed responses preceding $i$ and
+the entire already selected batch containing $i$. At a batch boundary,
+include the new batch choice and any independent policy randomization
+before revealing that batch's first response. These sigma-fields are
+nested: a new batch is formed only from completed earlier data and
+parameter-independent randomization. Thus $x_i$ is
+$\mathscr F_{i-1}$-measurable. For $i=(t-1)m+j$, conditional
+independence within $\mathcal B_t$ yields
+\begin{align}
+\E[\xi_i\mid\mathscr F_{i-1}]&=0,\notag\\
+\E[\xi_i^2\mid\mathscr F_{i-1}]&=w_{\theta^\star}(x_i),\notag\\
+\E[e^{a\xi_i}\mid\mathscr F_{i-1}]&\le e^{a^2\sigma^2/2}
+\quad(a\in\R).
+\label{eq:app-predictable-noise}
+\end{align}
+Earlier responses within the same batch do not change the next
+response's conditional law given that batch and its preceding data.
+This analytical revelation does not allow the policy to use those
+responses when choosing its batch. In particular, we never condition
+on the entire future, adaptively selected query sequence.
+
+\subsubsection*{Score covariance.}
+For $i<k$, $x_i\xi_i x_k^\top$ is
+$\mathscr F_{k-1}$-measurable. Consequently,
+\begin{equation}
+\E[x_i\xi_i\xi_kx_k^\top]
+=\E\!\left[x_i\xi_i x_k^\top
+\E[\xi_k\mid\mathscr F_{k-1}]\right]=0.
+\label{eq:app-cross-score-zero}
+\end{equation}
+The diagonal terms satisfy
+\begin{equation}
+\E[x_i\xi_i^2x_i^\top]
+=\E[x_ix_i^\top\E[\xi_i^2\mid\mathscr F_{i-1}]]
+=\E[G_{\theta^\star}(x_i)].
+\label{eq:app-diagonal-score}
+\end{equation}
+Expanding the double sum in $U_nU_n^\top$ therefore gives
+\begin{equation}
+\E[U_n]=0,\qquad
+\E[U_nU_n^\top]=\sum_{i=1}^n\E[G_{\theta^\star}(x_i)]
+=\E[Z_n-\rho I].
+\label{eq:app-score-cov}
+\end{equation}
+All expectations here are under $\theta^\star$.
+
+\subsubsection*{Existence of the implemented optimizers.}
+For fixed data, the objective in \eqref{eq:mle} is continuous on the
+compact set $\Theta$, and its Hessian dominates $\rho I$. It therefore
+has a unique minimizer. For a fixed temporary state and fitted
+parameter, the query score is continuous on the compact ball; its
+maximum is attained. The fixed measurable tie rule specified in the
+algorithm selects an admissible maximizer. No approximate oracle is
+substituted in the proof.
+
+\subsection{Proofs of Spectral Smoothing Bounds}
+\label{app:spectral}
+
+For a matrix $K$, $\norm{K}_1$ denotes the sum of its singular values
+(the trace norm); $\norm{K}_{\op}$ denotes its largest singular value.
+For $1\le p<\infty$, the Schatten norm is
+$\norm{K}_p=(\sum_r s_r(K)^p)^{1/p}$, where $s_r(K)$ are the singular
+values. A density matrix is positive semidefinite with trace one.
+If it is positive definite, its entropy is
+$\mathcal H(P)=-\tr(P\log P)$.
+
+\begin{lemma}[Spectral sensitivity]
+\label{lem:gibbs}
+For symmetric $A_1,A_2,D$ and $\tau>0$,
+\begin{align}
+\norm{P_\tau(A_1)-P_\tau(A_2)}_1
+&\le 2\norm{A_1-A_2}_{\op}/\tau,
+\label{eq:app-gibbs-lip}\\
+\Phi_\tau(A_1+D)-\Phi_\tau(A_1)
+&\ge\tr(P_\tau(A_1)D)-\norm{D}_{\op}^2/\tau.
+\label{eq:app-potential-increment}
+\end{align}
+\end{lemma}
+
+\begin{proof}
+\textit{Matrix-exponential derivative.}
+For square matrices $K,E$, let $\mathrm D\exp(K)[E]$ denote the
+coefficient of the first-order variation of $\exp(K)$ in direction $E$.
+Termwise differentiation of the absolutely convergent exponential
+series on bounded matrix sets gives
+\begin{equation}
+\mathrm D\exp(K)[E]
+=\sum_{r=1}^\infty\frac1{r!}
+\sum_{a=0}^{r-1}K^aEK^{r-1-a}
+=\int_0^1e^{sK}Ee^{(1-s)K}\,ds.
+\label{eq:app-exp-derivative}
+\end{equation}
+The integral identity follows by multiplying the two series:
+\begin{equation}
+\int_0^1\frac{s^a(1-s)^b}{a!b!}\,ds
+=\frac1{(a+b+1)!},\qquad a,b\in\{0,1,\ldots\}.
+\label{eq:app-beta-integral}
+\end{equation}
+The integral evaluation follows by repeated integration by parts;
+its value is $a!b!/(a+b+1)!$ before division by $a!b!$.
+Thus no commutation between $K$ and $E$ is required.
+
+Fix $A=A_1$. Define the matrix-valued map $F(A)=e^{-A/\tau}$
+and its scalar normalizer $z(A)=\tr F(A)$, and abbreviate
+$F=F(A)$, $z=z(A)$, and $P=F/z$. The symbols
+$\mathrm DF(A)[D]$ and $\mathrm Dz(A)[D]$ denote their derivatives
+in direction $D$. By \eqref{eq:app-exp-derivative} and cyclicity of the trace,
+\begin{align}
+\mathrm DF(A)[D]&=-\frac1\tau
+\int_0^1e^{-sA/\tau}De^{-(1-s)A/\tau}\,ds,\notag\\
+\mathrm Dz(A)[D]&=-\frac1\tau\tr(FD).
+\label{eq:app-exp-normalizer}
+\end{align}
+Since $e^{-sA/\tau}=z^sP^s$, the quotient rule yields
+\begin{align}
+\mathrm DP_\tau(A)[D]
+&=\frac{\mathrm DF(A)[D]}z-\frac{F\,\mathrm Dz(A)[D]}{z^2}\notag\\
+&=-\frac1\tau\int_0^1P^sDP^{1-s}\,ds
++\frac1\tau P\tr(PD).
+\label{eq:app-duhamel}
+\end{align}
+For $0<s<1$, the Schatten H\"older inequality gives
+\begin{align}
+\norm{P^sDP^{1-s}}_1
+&\le\norm{P^s}_{1/s}\norm{D}_{\op}
+\norm{P^{1-s}}_{1/(1-s)}\notag\\
+&=(\tr P)^s\norm{D}_{\op}(\tr P)^{1-s}
+=\norm{D}_{\op}.
+\label{eq:app-holder-density}
+\end{align}
+The same bound at $s=0,1$ follows by continuity. Moreover,
+\begin{equation}
+\norm{P\tr(PD)}_1
+=|\tr(PD)|\tr P\le\norm{D}_{\op}.
+\label{eq:app-trace-part}
+\end{equation}
+It follows that
+$\norm{\mathrm DP_\tau(A)[D]}_1\le2\norm{D}_{\op}/\tau$.
+Applying this derivative bound on the segment joining $A_1$ and $A_2$
+proves
+\begin{align}
+\norm{P_\tau(A_2)-P_\tau(A_1)}_1
+&=\left\|\int_0^1\mathrm DP_\tau(A_1+s(A_2-A_1))
+[A_2-A_1]\,ds\right\|_1\notag\\
+&\le\int_0^1\frac{2\norm{A_2-A_1}_{\op}}\tau\,ds.
+\label{eq:app-integrated-sensitivity}
+\end{align}
+
+\textit{Potential increment.}
+Differentiating $\Phi_\tau(A)=-\tau\log z$ gives
+\begin{equation}
+\mathrm D\Phi_\tau(A)[D]
+=-\tau\frac{\mathrm Dz(A)[D]}z=\tr(P_\tau(A)D).
+\label{eq:app-potential-derivative}
+\end{equation}
+Using $|\tr(KD)|\le\norm{K}_1\norm{D}_{\op}$ and the first part,
+\begin{align}
+\Phi_\tau(A+D)-\Phi_\tau(A)-\tr(P_\tau(A)D)
+&=\int_0^1\tr\!\big((P_\tau(A+sD)-P_\tau(A))D\big)\,ds\notag\\
+&\ge-\int_0^1\frac{2s\norm{D}_{\op}^2}{\tau}\,ds
+=-\frac{\norm{D}_{\op}^2}{\tau}.
+\label{eq:app-smoothness-integral}
+\end{align}
+This proves the second inequality.
+\end{proof}
+
+\subsubsection*{Energy and temperature identities used below.}
+Let $\lambda_r$ be the eigenvalues of a symmetric $A$, and let
+$\lambda=\min_r\lambda_r$. Since
+$1\le\sum_r e^{-(\lambda_r-\lambda)/\tau}\le d$,
+\begin{equation}
+\Phi_\tau(A)
+=\lambda-\tau\log\!\left(\sum_{r=1}^d
+ e^{-(\lambda_r-\lambda)/\tau}\right)
+\in[\lambda-\tau\log d,\lambda].
+\label{eq:app-soft-min-bracket}
+\end{equation}
+For the eigenvalues $p_r>0$ of $P=P_\tau(A)$,
+$\sum_rp_r=1$ and $p_r\le1$, so $\mathcal H(P)\ge0$.
+Concavity of the scalar logarithm gives
+\begin{equation}
+\mathcal H(P)=\sum_{r=1}^dp_r\log(1/p_r)
+\le\log\!\left(\sum_{r=1}^dp_r/p_r\right)=\log d.
+\label{eq:app-entropy-bound}
+\end{equation}
+The equality $\log P=-A/\tau-(\log z)I$ implies
+\begin{equation}
+\Phi_\tau(A)=\tr(PA)-\tau\mathcal H(P),\qquad
+\tr(PA)\le\lambda_{\min}(A)+\tau\log d.
+\label{eq:app-gibbs-energy}
+\end{equation}
+At fixed $A$,
+$\partial_\tau z=\tau^{-2}\tr(Ae^{-A/\tau})$. Therefore
+\begin{equation}
+\partial_\tau\Phi_\tau(A)
+=-\log z-\tau^{-1}\tr(PA)=-\mathcal H(P_\tau(A)).
+\label{eq:app-temperature-derivative}
+\end{equation}
+For $\tau'\ge\tau$, integration gives
+\begin{equation}
+\Phi_{\tau'}(A)-\Phi_\tau(A)
+=-\int_\tau^{\tau'}\mathcal H(P_v(A))\,dv
+\ge-(\tau'-\tau)\log d.
+\label{eq:app-temp-change}
+\end{equation}
+
+\subsection{Proofs of Deterministic Excitation}
+\label{app:excitation}
+
+\begin{lemma}[Input excitation]
+\label{lem:excitation}
+There are $c_E>0$ and $N_E\ge1$, independent of $m$, such that
+\begin{equation}
+\lambda_{\min}(H_N)\ge c_E\frac N{\log(e+N)}
+\qquad(N=mT\ge N_E)
+\label{eq:app-excitation}
+\end{equation}
+for the sample-scaled policy, even with arbitrary fitted parameters
+in $\Theta$.
+\end{lemma}
+
+\begin{proof}
+\textit{Step 1: every chosen query has nonzero weighted information.}
+Consider query $i+1$ in round $t$, with $i$ previous queries selected,
+and denote its temporary plug-in matrix by $W_i$.
+All $i$ queries are evaluated at the current round's fitted parameter,
+so \eqref{eq:app-comparability} gives
+$a_0H_i\preceq W_i\preceq b_0H_i$.
+Set $P=P_{\tau_t}(W_i)$ and let $v$ be a unit eigenvector for
+$\lambda_{\max}(P)$. Since $\tr P=1$, $\lambda_{\max}(P)\ge1/d$.
+The query $Lv$ belongs to the full ball. Exact score maximization gives
+\begin{align}
+\overline w\,x_{i+1}^\top Px_{i+1}
+&\ge w_{\widehat\theta_{t-1}}(x_{i+1})x_{i+1}^\top Px_{i+1}\notag\\
+&\ge w_{\widehat\theta_{t-1}}(Lv)L^2v^\top Pv
+\ge\underline wL^2/d.
+\label{eq:app-score-lower-proof}
+\end{align}
+Thus
+\begin{equation}
+x_{i+1}^\top Px_{i+1}
+\ge\frac{\underline wL^2}{\overline w d}.
+\label{eq:app-score-lower}
+\end{equation}
+
+\textit{Step 2: convert spectral score into input leverage.}
+Define $q_i=x_{i+1}^\top H_i^{-1}x_{i+1}$ and the terminal minimum
+eigenvalue $h_N=\lambda_{\min}(H_N)$.
+The matrix $H_i^{1/2}PH_i^{1/2}$ is positive semidefinite. Its largest
+eigenvalue is at most its trace, so
+\begin{align}
+x_{i+1}^\top Px_{i+1}
+&=(H_i^{-1/2}x_{i+1})^\top
+ H_i^{1/2}PH_i^{1/2}(H_i^{-1/2}x_{i+1})\notag\\
+&\le\tr(PH_i)q_i.
+\label{eq:app-score-leverage}
+\end{align}
+By matrix comparison and \eqref{eq:app-gibbs-energy},
+\begin{align}
+\tr(PH_i)
+&\le a_0^{-1}\tr(PW_i)\notag\\
+&\le a_0^{-1}\big(\lambda_{\min}(W_i)+\tau_t\log d\big)\notag\\
+&\le a_0^{-1}\big(b_0\lambda_{\min}(H_i)+\tau_t\log d\big)\notag\\
+&\le a_0^{-1}\big(b_0h_N+\tau_T\log d\big).
+\label{eq:app-energy-bound}
+\end{align}
+The third line follows by evaluating $W_i\preceq b_0H_i$ at a minimum
+eigenvector of $H_i$. The last line uses $H_i\preceq H_N$ and the
+increasing temperature. Define
+\begin{equation}
+c_0=\frac{a_0\underline wL^2}{\overline w d},\qquad
+q_{\max}=L^2/\rho,\qquad c_1=\frac{c_0}{1+q_{\max}}.
+\label{eq:app-excitation-constants}
+\end{equation}
+Equations \eqref{eq:app-score-lower}--\eqref{eq:app-energy-bound}, and
+$H_i\succeq\rho I$, yield
+\begin{equation}
+\frac{c_0}{b_0h_N+\tau_T\log d}\le q_i\le q_{\max}.
+\label{eq:app-leverage-lower}
+\end{equation}
+
+\textit{Step 3: sum leverage through a determinant identity.}
+Since $H_{i+1}=H_i+x_{i+1}x_{i+1}^\top$,
+\begin{equation}
+\det H_{i+1}=\det H_i\,
+\det\!\left(I+H_i^{-1/2}x_{i+1}x_{i+1}^\top H_i^{-1/2}\right)
+=\det H_i(1+q_i).
+\label{eq:app-determinant-update}
+\end{equation}
+The last matrix has eigenvalues $1+q_i,1,\ldots,1$.
+For $0\le q\le q_{\max}$,
+\begin{equation}
+\log(1+q)=\int_0^q\frac{dv}{1+v}
+\ge\frac q{1+q_{\max}}.
+\label{eq:app-log-leverage}
+\end{equation}
+If $\lambda_1(H_N),\ldots,\lambda_d(H_N)$ are its positive eigenvalues,
+the arithmetic--geometric mean inequality gives
+\begin{align}
+\frac{\det H_N}{\det H_0}
+&=\prod_{r=1}^d\frac{\lambda_r(H_N)}\rho
+\le\left(\frac{\tr H_N}{\rho d}\right)^d
+\le\left(1+\frac{NL^2}{\rho d}\right)^d.
+\label{eq:app-determinant-upper}
+\end{align}
+Combining these displays proves the explicit inequality
+\begin{equation}
+\frac{Nc_1}{b_0h_N+\tau_T\log d}
+\le\sum_{i=0}^{N-1}\log(1+q_i)
+=\log\frac{\det H_N}{\det H_0}
+\le d\log\!\left(1+\frac{NL^2}{\rho d}\right).
+\label{eq:app-excitation-det}
+\end{equation}
+This determinant is only an analytical device; the policy has not
+been changed to a log-determinant objective.
+
+\textit{Step 4: give constants and an $m$-independent threshold.}
+Define
+\begin{equation}
+a=L^2/(\rho d),\qquad c_h=1+\log\max\{1,a\}.
+\label{eq:app-log-constant}
+\end{equation}
+For $N\ge1$, $1+aN\le\max\{1,a\}(1+N)$ and $\log(e+N)\ge1$ imply
+$\log(1+aN)\le c_h\log(e+N)$. Rearranging
+\eqref{eq:app-excitation-det} with $\tau_T=\tau_0N^{3/4}$ gives
+\begin{align}
+h_N
+&\ge\frac1{b_0}\left[
+\frac{Nc_1}{d\log(1+aN)}-\tau_0N^{3/4}\log d\right]\notag\\
+&\ge\frac{c_1N}{b_0dc_h\log(e+N)}
+-\frac{\tau_0\log d}{b_0}N^{3/4}.
+\label{eq:app-explicit-excitation}
+\end{align}
+Because $\log(e+N)/N^{1/4}\to0$, choose $N_E$ so that, for all
+integers $N\ge N_E$,
+\begin{equation}
+\frac{\log(e+N)}{N^{1/4}}
+\le\frac{c_1}{2dc_h\tau_0\log d}.
+\label{eq:app-excitation-threshold}
+\end{equation}
+This choice depends only on the displayed model constants, not on $m$.
+The negative term in \eqref{eq:app-explicit-excitation} is then at most
+half the positive term. Set
+\begin{equation}
+c_E=\frac{c_1}{2b_0dc_h}.
+\label{eq:app-excitation-final-constant}
+\end{equation}
+This proves the lemma. By \eqref{eq:app-comparability}, both
+$V_T^\star$ and $\Vhat_T$ have minimum eigenvalue at least $a_0h_N$.
+No concentration inequality, parameter consistency, or accurate
+initial fit was used.
+\end{proof}
+
+\subsection{Proofs of Confidence and Preliminary Localization}
+\label{app:localization}
+
+For $n\ge1$ and $\delta\in(0,1)$, define the score radius
+\begin{equation}
+b_n(\delta)=\sigma\sqrt{
+ d\log\!\left(1+\frac{nL^2}{\rho d}\right)+2\log\frac2\delta}.
+\label{eq:app-score-radius}
+\end{equation}
+We first derive its uniform-in-time probability guarantee, then use
+constrained optimality. This is the self-normalized method of
+\citet[Theorem 1]{AbbasiYadkori2011}, written here for the precise
+filtration and ridge matrix used in this manuscript.
+
+\begin{lemma}[Time-uniform score event]
+\label{lem:score}
+There is an event $\mathcal E_\delta$ with
+$\Prob(\mathcal E_\delta)\ge1-\delta/2$ on which
+\begin{equation}
+\norm{U_n}_{H_n^{-1}}\le b_n(\delta)\qquad\text{for all }n\ge1.
+\label{eq:app-self-normalized}
+\end{equation}
+\end{lemma}
+
+\begin{proof}
+\textit{Step 1: exponential supermartingales.}
+The positive conditional response variance ensures $\sigma>0$.
+For a fixed vector $z\in\R^d$, define
+\begin{equation}
+\mathcal M_n(z)=\exp\!\left\{
+ \frac{z^\top U_n}{\sigma}
+ -\frac12\sum_{i=1}^n(z^\top x_i)^2\right\}.
+\label{eq:app-fixed-exponential}
+\end{equation}
+Using \eqref{eq:app-predictable-noise},
+\begin{align}
+\E[\mathcal M_n(z)\mid\mathscr F_{n-1}]
+&=\mathcal M_{n-1}(z)
+\E\!\left[\exp\!\left\{\frac{z^\top x_n}{\sigma}\xi_n
+-\frac12(z^\top x_n)^2\right\}\middle|\mathscr F_{n-1}\right]
+\le\mathcal M_{n-1}(z).
+\label{eq:app-supermartingale-step}
+\end{align}
+Thus this is a nonnegative supermartingale with initial value one.
+
+\textit{Step 2: compute a Gaussian mixture exactly.}
+Let $q_\rho(z)=(\rho/(2\pi))^{d/2}e^{-\rho\norm{z}_2^2/2}$ be the
+Gaussian density with covariance $\rho^{-1}I$, and define
+$\overline{\mathcal M}_n=\int\mathcal M_n(z)q_\rho(z)\,dz$.
+Nonnegativity permits conditional integration of
+\eqref{eq:app-supermartingale-step}, so the mixture is also a
+nonnegative supermartingale with $\overline{\mathcal M}_0=1$.
+The exponent in the integral satisfies
+\begin{align}
+\frac{z^\top U_n}{\sigma}-\frac12z^\top H_nz
+&=-\frac12\left(z-\frac{H_n^{-1}U_n}{\sigma}\right)^\top
+ H_n\left(z-\frac{H_n^{-1}U_n}{\sigma}\right)
+ +\frac{\norm{U_n}_{H_n^{-1}}^2}{2\sigma^2}.
+\label{eq:app-mixture-square}
+\end{align}
+Translation and diagonalization of $H_n$ give
+\begin{align}
+\overline{\mathcal M}_n
+&=\left(\frac\rho{2\pi}\right)^{d/2}
+ e^{\norm{U_n}_{H_n^{-1}}^2/(2\sigma^2)}
+ \int_{\R^d}e^{-z^\top H_nz/2}\,dz\notag\\
+&=\frac{\det(\rho I)^{1/2}}{\det(H_n)^{1/2}}
+ e^{\norm{U_n}_{H_n^{-1}}^2/(2\sigma^2)}.
+\label{eq:app-mixture-evaluation}
+\end{align}
+Indeed, in an eigenbasis, the integral is the product of
+$\int_\R e^{-\lambda_r(H_n)v^2/2}\,dv
+=(2\pi/\lambda_r(H_n))^{1/2}$.
+
+\textit{Step 3: control all times with one event.}
+Let $\nu=\inf\{n\ge0:\overline{\mathcal M}_n\ge2/\delta\}$, with
+$\inf\varnothing=\infty$. For an integer $k\ge1$,
+\begin{equation}
+\overline{\mathcal M}_{\nu\wedge k}
+=1+\sum_{n=1}^k\mathbf1_{\{\nu\ge n\}}
+(\overline{\mathcal M}_n-\overline{\mathcal M}_{n-1}).
+\label{eq:app-stopped-sum}
+\end{equation}
+The indicator is $\mathscr F_{n-1}$-measurable. Taking conditional
+expectations term by term shows
+$\E[\overline{\mathcal M}_{\nu\wedge k}]\le1$.
+Nonnegativity and the definition of $\nu$ imply
+\begin{equation}
+\frac2\delta\Prob(\nu\le k)
+\le\E[\overline{\mathcal M}_{\nu\wedge k}]\le1.
+\label{eq:app-stopped-threshold}
+\end{equation}
+Letting $k\to\infty$ gives $\Prob(\nu<\infty)\le\delta/2$.
+Define $\mathcal E_\delta=\{\nu=\infty\}$. On this event,
+\eqref{eq:app-mixture-evaluation} implies, for every $n$,
+\begin{equation}
+\norm{U_n}_{H_n^{-1}}^2
+\le\sigma^2\left[
+\log\frac{\det H_n}{\det(\rho I)}+2\log\frac2\delta\right].
+\label{eq:app-determinant-confidence}
+\end{equation}
+The determinant estimate \eqref{eq:app-determinant-upper}, with $n$
+in place of $N$, yields \eqref{eq:app-self-normalized}.
+\end{proof}
+
+For the ridge likelihood at a completed count, define
+\begin{equation}
+\mathcal L_N(\theta)=\sum_{i=1}^N
+\big[A(x_i^\top\theta)-Y_ix_i^\top\theta\big]
++\frac\rho2\norm{\theta}_2^2.
+\label{eq:app-loss-definition}
+\end{equation}
+For $e_T=\thetahat_T-\theta^\star$, its integrated Hessian is
+\begin{equation}
+K_N=\int_0^1\nabla^2\mathcal L_N(\theta^\star+s e_T)\,ds
+=\rho I+\sum_{i=1}^N
+\left[\int_0^1w_{\theta^\star+s e_T}(x_i)\,ds\right]x_ix_i^\top.
+\label{eq:app-integrated-hessian}
+\end{equation}
+The segment is feasible by convexity, and hence
+$a_0H_N\preceq K_N\preceq b_0H_N$.
+
+\begin{lemma}[Constrained localization]
+\label{lem:localization}
+On $\mathcal E_\delta$, for every $N=mT$,
+\begin{equation}
+\norm{e_T}_{H_N}\le\frac{b_N(\delta)+\sqrt\rho S}{a_0},
+\qquad\norm{e_T}_{\Vhat_T}\le\beta_N(\delta).
+\label{eq:app-confidence}
+\end{equation}
+Moreover, $\norm{e_T}_2\le C_L\log(eN/\delta)/\sqrt N$ for a constant
+$C_L$ independent of $m,T,\delta$.
+\end{lemma}
+
+\begin{proof}
+\textit{Step 1: use the constrained inequality, not a zero gradient.}
+Differentiation gives
+\begin{align}
+\nabla\mathcal L_N(\theta^\star)&=-U_N+\rho\theta^\star,\notag\\
+\nabla\mathcal L_N(\thetahat_T)-\nabla\mathcal L_N(\theta^\star)
+&=\int_0^1\nabla^2\mathcal L_N(\theta^\star+s e_T)e_T\,ds
+=K_Ne_T.
+\label{eq:app-gradient-expansion}
+\end{align}
+Since $\thetahat_T$ minimizes over the convex set $\Theta$,
+$\nabla\mathcal L_N(\thetahat_T)^\top(\theta^\star-\thetahat_T)\ge0$.
+Substituting \eqref{eq:app-gradient-expansion} gives
+\begin{equation}
+e_T^\top K_Ne_T
+\le e_T^\top(U_N-\rho\theta^\star).
+\label{eq:app-variational}
+\end{equation}
+Thus a boundary solution causes no difficulty.
+
+\textit{Step 2: obtain the ellipsoid.}
+Cauchy--Schwarz in the $H_N$ norm gives
+\begin{align}
+a_0\norm{e_T}_{H_N}^2
+&\le e_T^\top K_Ne_T
+\le\norm{e_T}_{H_N}\norm{U_N-\rho\theta^\star}_{H_N^{-1}}\notag\\
+&\le\norm{e_T}_{H_N}
+\left(\norm{U_N}_{H_N^{-1}}+
+\rho\norm{\theta^\star}_{H_N^{-1}}\right)\notag\\
+&\le\norm{e_T}_{H_N}\big(b_N(\delta)+\sqrt\rho S\big).
+\label{eq:app-constrained-cauchy}
+\end{align}
+The last step uses $H_N^{-1}\preceq\rho^{-1}I$ and
+\cref{lem:score}. Division by $\norm{e_T}_{H_N}$ is valid when $e_T\ne0$;
+when $e_T=0$, the bound is immediate. Since
+$\Vhat_T\preceq b_0H_N$,
+\begin{equation}
+\norm{e_T}_{\Vhat_T}
+\le\sqrt{b_0}\norm{e_T}_{H_N}
+\le\frac{\sqrt{b_0}}{a_0}\big(b_N(\delta)+\sqrt\rho S\big)
+=\beta_N(\delta).
+\label{eq:app-ellipsoid-result}
+\end{equation}
+
+\textit{Step 3: make preliminary localization uniform in $m$.}
+Define $\Lambda_N=\log(eN/\delta)\ge1$ and, using $c_h$ from
+\eqref{eq:app-log-constant}, set
+\begin{equation}
+K_b=\sigma\sqrt{dc_h+2+2\log2}+\sqrt\rho S.
+\label{eq:app-radius-constant}
+\end{equation}
+The inequalities $\log(1+aN)\le c_h\Lambda_N$ and
+$2\log(2/\delta)\le(2+2\log2)\Lambda_N$ imply
+\begin{equation}
+b_N(\delta)+\sqrt\rho S\le K_b\sqrt{\Lambda_N}.
+\label{eq:app-radius-log-control}
+\end{equation}
+For $N\ge N_E$, combine \cref{lem:excitation} with
+$\log(e+N)\le2\Lambda_N$ to obtain
+\begin{align}
+\norm{e_T}_2
+&\le\frac{\norm{e_T}_{H_N}}{\sqrt{\lambda_{\min}(H_N)}}
+\le\frac{K_b}{a_0}\sqrt{\Lambda_N}
+\sqrt{\frac{\log(e+N)}{c_EN}}\notag\\
+&\le\frac{\sqrt2K_b}{a_0\sqrt{c_E}}
+\frac{\Lambda_N}{\sqrt N}.
+\label{eq:app-large-count-localization}
+\end{align}
+For $1\le N<N_E$, compactness gives
+$\norm{e_T}_2\le2S\le2S\sqrt{N_E}\Lambda_N/\sqrt N$.
+Therefore the explicit choice
+\begin{equation}
+C_L=\max\left\{\frac{\sqrt2K_b}{a_0\sqrt{c_E}},\,
+2S\sqrt{N_E}\right\}
+\label{eq:app-localization-constant}
+\end{equation}
+works for every completed count, proving
+\begin{equation}
+\norm{e_T}_2\le C_L\frac{\log(eN/\delta)}{\sqrt N}.
+\label{eq:app-preliminary-localization}
+\end{equation}
+Neither \cref{thm:information} nor optimal information growth was used.
+\end{proof}
+
+\subsection{Proofs of Proposition 1 and the Design Benchmark}
+\label{app:ceiling}
+
+\begin{proof}[Proof of \cref{prop:ceiling}]
+\textit{Step 1: compactness and attainment.}
+Let $\mathbb S^d$ be the real symmetric $d\times d$ matrices, a vector
+space of dimension $q=d(d+1)/2$. Define
+\begin{equation}
+\mathcal K=\{G_{\theta^\star}(x):x\in\mathcal X\},\qquad
+\mathcal C=\{M(\nu):\nu\in\mathcal P(\mathcal X)\}.
+\label{eq:app-feasible-matrices}
+\end{equation}
+Continuity of $G_{\theta^\star}$ and compactness of the ball make
+$\mathcal K$ compact. We spell out why its convex hull is compact.
+Any convex combination of more than $q+1$ matrices can be shortened:
+if its positive weights are $p_r$ and matrices are $A_r\in\mathcal K$,
+the vectors $(A_r,1)$ are linearly dependent. Thus there are coefficients
+$\alpha_r$, not all zero, with
+$\sum_r\alpha_rA_r=0$ and $\sum_r\alpha_r=0$.
+There are both positive and negative $\alpha_r$. Taking
+$s=\min_{\alpha_r>0}p_r/\alpha_r$ replaces the weights by
+$p_r-s\alpha_r\ge0$, preserves their sum and weighted matrix, and
+sets at least one weight to zero. Repeating reduces to $q+1$ terms.
+Consequently the convex hull is the continuous image of the compact
+product of $q+1$ copies of $\mathcal K$ and their probability simplex,
+and is compact.
+
+Every finite convex combination is $M(\nu)$ for a finite-support
+measure. Conversely, uniform continuity of $G_{\theta^\star}$ on
+$\mathcal X$ allows its integral under any probability measure to be
+approximated, in operator norm, by finite weighted sums: partition the
+ball into finitely many sets on which $G$ varies by at most $\epsilon$,
+choose one point from each nonempty set, and use the measure of that
+set as its weight. The approximation error is at most $\epsilon$.
+The convex hull is closed, so the integral also belongs to it.
+Thus $\mathcal C$ equals this compact convex hull.
+
+For symmetric $A_1,A_2$, the Rayleigh representation gives
+\begin{equation}
+|\lambda_{\min}(A_1)-\lambda_{\min}(A_2)|
+\le\norm{A_1-A_2}_{\op}.
+\label{eq:app-rayleigh-continuity}
+\end{equation}
+For example, evaluating $A_1$ at a minimum unit eigenvector of $A_2$
+gives one side, and exchanging the two matrices gives the other.
+Hence $\lambda_{\min}$ is continuous on $\mathcal C$ and attains its
+maximum, $\gamma^\star$.
+
+\textit{Step 2: bound the optimal rate.}
+Let $e_1,\ldots,e_d$ be the standard coordinate unit vectors and let
+$\nu_0$ give weight $1/d$ to each query $Le_r$. Then
+\begin{equation}
+M(\nu_0)=\frac{L^2}{d}\sum_{r=1}^d
+ w_{\theta^\star}(Le_r)e_re_r^\top
+\succeq\frac{\underline wL^2}{d}I.
+\label{eq:app-coordinate-design}
+\end{equation}
+For every feasible $\nu$,
+\begin{align}
+d\lambda_{\min}(M(\nu))
+&\le\tr(M(\nu))
+=\int w_{\theta^\star}(x)\norm{x}_2^2\,d\nu(x)
+\le\overline wL^2=B.
+\label{eq:app-trace-rate-bound}
+\end{align}
+Taking the maximum gives \eqref{eq:rate-range}.
+
+\textit{Step 3: apply the feasible-set bound pathwise.}
+For any realized adaptive query sequence, define its empirical
+probability measure by $\nu_N=N^{-1}\sum_{i=1}^N\delta_{x_i}$,
+where $\delta_x$ denotes unit mass at $x$. Then
+\begin{equation}
+\frac{Z_N-\rho I}{N}=M(\nu_N),\qquad
+\lambda_{\min}(Z_N)=\rho+N\lambda_{\min}(M(\nu_N))
+\le\rho+N\gamma^\star.
+\label{eq:app-pathwise-ceiling}
+\end{equation}
+This holds on every path and does not require expectations.
+\end{proof}
+
+\subsubsection*{The ideal score needed for the policy comparison.}
+For any density matrix $P$ and any maximizing measure $\nu^\star$,
+$M(\nu^\star)\succeq\gamma^\star I$. Therefore
+\begin{align}
+\max_{x\in\mathcal X}\tr(PG_{\theta^\star}(x))
+&\ge\int\tr(PG_{\theta^\star}(x))\,d\nu^\star(x)\notag\\
+&=\tr(PM(\nu^\star))
+\ge\gamma^\star\tr P=\gamma^\star.
+\label{eq:app-ideal-score}
+\end{align}
+The last trace inequality follows because
+$P^{1/2}(M(\nu^\star)-\gamma^\star I)P^{1/2}$ is positive semidefinite.
+No interchange of a minimum and maximum is needed.
+
+\subsection{Proofs of Theorem 1 and the Batched Gain Bound}
+\label{app:information}
+
+\subsubsection{Temporary states and score comparison}
+
+Let $n_{t,j}=(t-1)m+j-1$ count the queries already selected before
+position $j$ of batch $t$. Define the true and plug-in temporary states by
+\begin{align}
+Z_{t,j-1}
+&=V_{t-1}^\star+\sum_{k=1}^{j-1}G_{\theta^\star}(x_{t,k}),\notag\\
+W_{t,j-1}
+&=\rho I+\sum_{s=1}^{t-1}\sum_{k=1}^m
+ G_{\widehat\theta_{t-1}}(x_{s,k})
+ +\sum_{k=1}^{j-1}G_{\widehat\theta_{t-1}}(x_{t,k}).
+\label{eq:app-true-temporary}
+\end{align}
+Thus $Z_{t,j-1}=Z_{n_{t,j}}$, while $W_{t,j-1}$ is exactly the
+state used by the algorithm. Both evaluate the same query prefix.
+Write $\eta_t=\norm{\widehat\theta_t-\theta^\star}_2$, including
+$\eta_0\le2S$. Define the true and plug-in scores for a candidate $x$ by
+\begin{equation}
+s_{t,j}^\star(x)=\tr(P_{\tau_t}(Z_{t,j-1})G_{\theta^\star}(x)),
+\qquad
+\widehat s_{t,j}(x)=\tr(P_{\tau_t}(W_{t,j-1})
+ G_{\widehat\theta_{t-1}}(x)).
+\label{eq:app-two-scores}
+\end{equation}
+Define a score-discrepancy bound and a bound on optimization loss by
+\begin{equation}
+d_{t,j}=C_F\eta_{t-1}\left(1+\frac{2Bn_{t,j}}{\tau_t}\right),
+\qquad \ell_{t,j}=\min\{B,2d_{t,j}\}.
+\label{eq:app-score-loss}
+\end{equation}
+These quantities are for analysis only.
+
+\begin{lemma}[Greedy batch gain]
+\label{lem:batch}
+For every batch and every realized history,
+\begin{equation}
+\Phi_{\tau_t}(V_t^\star)-\Phi_{\tau_t}(V_{t-1}^\star)
+\ge m\gamma^\star-\frac{mB^2}{\tau_t}
+-\sum_{j=1}^m\ell_{t,j}.
+\label{eq:app-batch-gain}
+\end{equation}
+\end{lemma}
+
+\begin{proof}
+\textit{Step 1: control re-evaluation of the entire prefix.}
+Apply \eqref{eq:app-fisher-lipschitz} to each of the $n_{t,j}$ matrices
+in \eqref{eq:app-true-temporary}:
+\begin{align}
+\norm{W_{t,j-1}-Z_{t,j-1}}_{\op}
+&\le\sum_{i=1}^{n_{t,j}}
+\norm{G_{\widehat\theta_{t-1}}(x_i)-G_{\theta^\star}(x_i)}_{\op}
+\le n_{t,j}C_F\eta_{t-1}.
+\label{eq:app-state-error}
+\end{align}
+For brevity in the next display write
+$\widehat P=P_{\tau_t}(W_{t,j-1})$ and
+$P^\star=P_{\tau_t}(Z_{t,j-1})$.
+Adding and subtracting $\tr(\widehat P G_{\theta^\star}(x))$ gives
+\begin{align}
+|\widehat s_{t,j}(x)-s_{t,j}^\star(x)|
+&=\left|\tr\!\left(\widehat P
+ [G_{\widehat\theta_{t-1}}(x)-G_{\theta^\star}(x)]\right)
+ +\tr\!\left((\widehat P-P^\star)G_{\theta^\star}(x)\right)\right|\notag\\
+&\le\norm{\widehat P}_1
+\norm{G_{\widehat\theta_{t-1}}(x)-G_{\theta^\star}(x)}_{\op}
+ +\norm{\widehat P-P^\star}_1\norm{G_{\theta^\star}(x)}_{\op}\notag\\
+&\le C_F\eta_{t-1}
+ +\frac{2B}{\tau_t}\norm{W_{t,j-1}-Z_{t,j-1}}_{\op}
+\le d_{t,j}.
+\label{eq:app-score-comparison}
+\end{align}
+We used $\norm{\widehat P}_1=\tr\widehat P=1$ and
+\cref{lem:gibbs}. The factor $n_{t,j}/\tau_t$ is essential: the
+weight error comes from the whole recomputed state, not just the
+newest query.
+
+\textit{Step 2: transfer exact maximization to the true score.}
+Let $x_{t,j}^\star$ maximize $s_{t,j}^\star$ over the ball.
+The implemented query maximizes $\widehat s_{t,j}$, hence
+\begin{align}
+s_{t,j}^\star(x_{t,j}^\star)-s_{t,j}^\star(x_{t,j})
+&=[s_{t,j}^\star(x_{t,j}^\star)-\widehat s_{t,j}(x_{t,j}^\star)]
+ +[\widehat s_{t,j}(x_{t,j}^\star)-\widehat s_{t,j}(x_{t,j})]\notag\\
+&\hspace{1em}+[\widehat s_{t,j}(x_{t,j})-s_{t,j}^\star(x_{t,j})]
+\le d_{t,j}+0+d_{t,j}.
+\label{eq:app-argmax-transfer}
+\end{align}
+Every true score lies in $[0,B]$, so the same nonnegative difference
+is at most $B$. Equation \eqref{eq:app-ideal-score} now yields
+\begin{equation}
+s_{t,j}^\star(x_{t,j})
+\ge s_{t,j}^\star(x_{t,j}^\star)-\ell_{t,j}
+\ge\gamma^\star-\ell_{t,j}.
+\label{eq:app-selected-true-score}
+\end{equation}
+
+\textit{Step 3: sum single-query increments within the batch.}
+Write $Z_{t,j}=Z_{t,j-1}+G_{\theta^\star}(x_{t,j})$.
+By \eqref{eq:app-potential-increment},
+\begin{align}
+\Phi_{\tau_t}(Z_{t,j})-\Phi_{\tau_t}(Z_{t,j-1})
+&\ge s_{t,j}^\star(x_{t,j})
+ -\frac{\norm{G_{\theta^\star}(x_{t,j})}_{\op}^2}{\tau_t}\notag\\
+&\ge\gamma^\star-\ell_{t,j}-B^2/\tau_t.
+\label{eq:app-query-potential-gain}
+\end{align}
+Summing over $j=1,\ldots,m$, and using
+$Z_{t,0}=V_{t-1}^\star$ and $Z_{t,m}=V_t^\star$, proves the lemma.
+\end{proof}
+
+The virtual update matters exactly in
+\eqref{eq:app-query-potential-gain}: the comparison uses the refreshed
+state before each query. One single application of smoothness to the
+aggregate increment would instead use
+\begin{equation}
+\frac1{\tau_t}\left\|\sum_{j=1}^mG_{\theta^\star}(x_{t,j})\right\|_{\op}^2
+\le\frac{(mB)^2}{\tau_t},
+\label{eq:app-coarse-batch-remainder}
+\end{equation}
+rather than summing $m$ terms of size $B^2/\tau_t$.
+This comparison of analytical remainders is not a performance lower
+bound on other batch algorithms.
+
+\subsubsection{Telescoping across batches and temperatures}
+
+\begin{proof}[Proof of \cref{thm:information}]
+Work on $\mathcal E_\delta$ from \cref{lem:score}. Its probability is
+at least $1-\delta/2$, and it is the same event used throughout.
+Fix a terminal count $N=mT$, and write $\Lambda_N=\log(eN/\delta)$.
+
+\textit{Step 1: keep the temperature-change terms explicit.}
+The exact telescoping identity is
+\begin{align}
+\Phi_{\tau_T}(V_T^\star)
+={}&\Phi_{\tau_1}(V_0^\star)
+ +\sum_{t=1}^T
+ [\Phi_{\tau_t}(V_t^\star)-\Phi_{\tau_t}(V_{t-1}^\star)]\notag\\
+&+\sum_{t=1}^{T-1}
+ [\Phi_{\tau_{t+1}}(V_t^\star)-\Phi_{\tau_t}(V_t^\star)].
+\label{eq:app-temperature-telescoping}
+\end{align}
+The first term is $\rho-\tau_1\log d$ because $V_0^\star=\rho I$.
+For each term in the second sum, \eqref{eq:app-temp-change} gives
+\begin{equation}
+\Phi_{\tau_{t+1}}(V_t^\star)-\Phi_{\tau_t}(V_t^\star)
+\ge-(\tau_{t+1}-\tau_t)\log d.
+\label{eq:app-temperature-loss}
+\end{equation}
+Thus \cref{lem:batch} and
+$\lambda_{\min}(Z_N)\ge\Phi_{\tau_T}(Z_N)$ imply
+\begin{align}
+\lambda_{\min}(Z_N)
+&\ge\rho-\tau_1\log d+N\gamma^\star
+ -B^2m\sum_{t=1}^T\frac1{\tau_t}
+ -\sum_{t=1}^T\sum_{j=1}^m\ell_{t,j}
+ -(\tau_T-\tau_1)\log d\notag\\
+&=\rho+N\gamma^\star-\tau_T\log d
+ -B^2m\sum_{t=1}^T\frac1{\tau_t}
+ -\sum_{t=1}^T\sum_{j=1}^m\ell_{t,j}.
+\label{eq:app-master-gap}
+\end{align}
+Only the true states $Z_n$ are additive. No telescoping identity is
+asserted for the recomputed matrices $\Vhat_t$.
+
+\textit{Step 2: evaluate every required power sum.}
+For $0<p<1$ and $T\ge1$, monotonicity of $s^{-p}$ gives
+\begin{align}
+\sum_{t=1}^Tt^{-p}
+&\le1+\int_1^T s^{-p}\,ds
+=\frac{T^{1-p}-p}{1-p}
+\le\frac{T^{1-p}}{1-p},\notag\\
+m\sum_{t=1}^T(mt)^{-p}
+&\le\frac{m^{1-p}T^{1-p}}{1-p}
+=\frac{N^{1-p}}{1-p}.
+\label{eq:app-power-sums}
+\end{align}
+In particular,
+\begin{equation}
+\tau_T=\tau_0N^{3/4},\qquad
+m\sum_{t=1}^T\frac1{\tau_t}
+=\frac1{\tau_0}m\sum_{t=1}^T(mt)^{-3/4}
+\le\frac4{\tau_0}N^{1/4}.
+\label{eq:app-temperature-sums}
+\end{equation}
+
+\textit{Step 3: bound delayed parameter errors and their sum.}
+The first batch has $\sum_j\ell_{1,j}\le Bm$ without using any
+localization. For $t\ge2$, there are $(t-1)m$ observed labels, and
+\cref{lem:localization} gives
+\begin{align}
+\eta_{t-1}
+&\le C_L\frac{\log(e(t-1)m/\delta)}{\sqrt{(t-1)m}}
+\le\sqrt2C_L\frac{\Lambda_N}{\sqrt{mt}},\notag\\
+\frac{n_{t,j}}{\tau_t}
+&\le\frac{mt}{\tau_0(mt)^{3/4}}
+=\tau_0^{-1}(mt)^{1/4}.
+\label{eq:app-delayed-error-components}
+\end{align}
+The first inequality uses only completed prior batches; the comparison
+$t-1\ge t/2$ explains the factor $\sqrt2$.
+Define $C_s=2\sqrt2C_FC_L$. Substitution into
+\eqref{eq:app-score-loss} yields
+\begin{equation}
+\ell_{t,j}\le C_s\Lambda_N
+\left[(mt)^{-1/2}+\frac{2B}{\tau_0}(mt)^{-1/4}\right]
+\qquad(t\ge2).
+\label{eq:app-delayed-error}
+\end{equation}
+Sum this bound using \eqref{eq:app-power-sums} with $p=1/2,1/4$:
+\begin{align}
+\sum_{t=1}^T\sum_{j=1}^m\ell_{t,j}
+&\le Bm+C_s\Lambda_N\left[
+ m\sum_{t=2}^T(mt)^{-1/2}
+ +\frac{2B}{\tau_0}m\sum_{t=2}^T(mt)^{-1/4}\right]\notag\\
+&\le Bm+2C_s\Lambda_NN^{1/2}
+ +\frac{8BC_s}{3\tau_0}\Lambda_NN^{3/4}.
+\label{eq:app-total-plugin-loss}
+\end{align}
+For $T=1$ the sums starting at $2$ are empty and the same upper
+bound remains valid.
+
+\textit{Step 4: obtain a nonasymptotic true-information gap.}
+The ceiling in \cref{prop:ceiling} and the previous calculations give
+\begin{align}
+0\le\rho+N\gamma^\star-\lambda_{\min}(Z_N)
+\le{}&\tau_0\log d\,N^{3/4}
+ +\frac{4B^2}{\tau_0}N^{1/4}+Bm\notag\\
+&+2C_s\Lambda_NN^{1/2}
+ +\frac{8BC_s}{3\tau_0}\Lambda_NN^{3/4}.
+\label{eq:app-decomposed-gap}
+\end{align}
+Every coefficient in this display is independent of $m$.
+The $Bm$ term is an upper bound for learning before the first labels,
+not a lower bound on batch delay.
+
+\textit{Step 5: compare the terminal recomputed information.}
+By \eqref{eq:app-fisher-lipschitz} and preliminary localization,
+\begin{align}
+\norm{\Vhat_T-Z_N}_{\op}
+&\le\sum_{i=1}^N
+\norm{G_{\widehat\theta_T}(x_i)-G_{\theta^\star}(x_i)}_{\op}
+\le NC_F\eta_T
+\le C_FC_L\Lambda_N\sqrt N.
+\label{eq:app-initial-tracking}
+\end{align}
+Define $D_N^{\mathrm{info}}=\rho+N\gamma^\star-\lambda_{\min}(Z_N)$,
+a nonnegative scalar. The eigenvalue continuity estimate
+\eqref{eq:app-rayleigh-continuity} gives
+\begin{align}
+\left|\frac{\lambda_{\min}(\Vhat_T)}N-\gamma^\star\right|
+&\le\frac{\norm{\Vhat_T-Z_N}_{\op}}N
+ +\left|\frac{\rho-D_N^{\mathrm{info}}}{N}\right|\notag\\
+&\le\frac{\norm{\Vhat_T-Z_N}_{\op}}N
+ +\frac\rho N+\frac{D_N^{\mathrm{info}}}N.
+\label{eq:app-plugin-eigenvalue-bound}
+\end{align}
+For $N\ge1$ and $\Lambda_N\ge1$, each of
+$N^{-1},N^{-3/4},N^{-1/2}$ is at most $\Lambda_NN^{-1/4}$.
+For example, the explicit constant
+\begin{equation}
+C=1+\rho+B+\tau_0\log d+\frac{4B^2}{\tau_0}
+ +2C_s+\frac{8BC_s}{3\tau_0}+C_FC_L
+\label{eq:app-main-constant}
+\end{equation}
+therefore makes both inequalities in \eqref{eq:information-rate}
+follow from \eqref{eq:app-decomposed-gap} and
+\eqref{eq:app-plugin-eigenvalue-bound}.
+All steps were deterministic on the single event $\mathcal E_\delta$,
+so they hold for all completed horizons simultaneously. Since
+$\Prob(\mathcal E_\delta)\ge1-\delta/2\ge1-\delta$, this proves the
+formal theorem.
+\end{proof}
+
+\subsubsection{Tracking, probability-one limits, and known curvature}
+
+\subsubsection*{Refined tracking on the same event.}
+Suppose $\varepsilon_{N,m}(\delta)\le\gamma^\star/2$.
+The second inequality in \eqref{eq:information-rate} implies
+\begin{equation}
+\lambda_{\min}(Z_N)
+\ge\rho+N(\gamma^\star-\varepsilon_{N,m}(\delta))
+\ge N\gamma^\star/2.
+\label{eq:app-refined-information}
+\end{equation}
+Because $Z_N\preceq b_0H_N$,
+$\lambda_{\min}(H_N)\ge N\gamma^\star/(2b_0)$.
+Using \eqref{eq:app-confidence} and
+\eqref{eq:app-radius-log-control},
+\begin{equation}
+\eta_T\le\frac{K_b}{a_0}
+\sqrt{\frac{2b_0\Lambda_N}{N\gamma^\star}}
+\le C_R\sqrt{\frac{\Lambda_N}{N}},\qquad
+C_R=\frac{K_b}{a_0}\sqrt{\frac{2b_0}{\gamma_0}}.
+\label{eq:app-refined-localization}
+\end{equation}
+The inequality $\norm{\Vhat_T-Z_N}_{\op}\le NC_F\eta_T$ then proves
+\eqref{eq:tracking}, for example with $C'=1+C_FC_R$.
+
+\subsubsection*{Almost-sure conclusions without a missing event argument.}
+Fix $m$. For every fixed $\delta$, the bounds on $\mathcal E_\delta$
+imply, as $T\to\infty$,
+\begin{equation}
+\varepsilon_{m,T}(\delta)\to0,\qquad
+\frac{\log(emT/\delta)}{\sqrt{mT}}\to0.
+\label{eq:app-deterministic-rate-limits}
+\end{equation}
+Let $\mathcal A_m$ be the event that both normalized minimum eigenvalues
+converge to $\gamma^\star$ and that $\widehat\theta_T\to\theta^\star$.
+The bounds imply $\mathcal E_\delta\subseteq\mathcal A_m$.
+Consequently, for every integer $k\ge1$,
+\begin{equation}
+\Prob(\mathcal A_m^c)
+\le\Prob(\mathcal E_{2^{-k}}^c)\le2^{-k-1},
+\qquad\text{and hence}\qquad\Prob(\mathcal A_m)=1.
+\label{eq:app-probability-one}
+\end{equation}
+Multiplication by the fixed $m$ changes the per-query limit
+$\gamma^\star$ into the per-round limit $\gstar$ in
+\eqref{eq:main-limit}. This argument does not assert simultaneous
+limits for a batch size growing with $T$.
+
+\subsubsection*{Parameter-independent curvature.}
+If $C_F=0$, \eqref{eq:app-fisher-lipschitz} shows that the information
+is independent of the fitted parameter. Then $\ell_{t,j}=0$ for all
+queries and $\Vhat_T=Z_N$. Substituting into
+\eqref{eq:app-master-gap} gives the deterministic refinement
+\begin{equation}
+0\le\frac{\rho+N\gamma^\star-\lambda_{\min}(V_T^\star)}N
+\le\tau_0\log d\,N^{-1/4}
++\frac{4B^2}{\tau_0}N^{-3/4}.
+\label{eq:app-known-curvature}
+\end{equation}
+The absence of a first-batch loss here demonstrates why $m/N$ was not
+claimed as an unavoidable delay cost.
+
+\subsection{Proofs of Proposition 2 and Euclidean Recovery}
+\label{app:confidence}
+
+\begin{proof}[Proof of \cref{prop:confidence} and its consequences]
+Fix a completed horizon on $\mathcal E_\delta$. For any unit vector $u$,
+Cauchy--Schwarz gives
+\begin{align}
+|u^\top e_T|
+&=|(\Vhat_T^{-1/2}u)^\top(\Vhat_T^{1/2}e_T)|\notag\\
+&\le\norm{\Vhat_T^{-1/2}u}_2\norm{e_T}_{\Vhat_T}
+\le\beta_N(\delta)\sqrt{u^\top\Vhat_T^{-1}u}.
+\label{eq:app-directional-proof}
+\end{align}
+There was no direction-dependent probability event, so this holds
+simultaneously for all unit directions, including any direction
+selected from the data. The same score event is used in
+\cref{thm:information}.
+
+For a realized vector, $\sup_{\norm{u}_2=1}|u^\top e_T|=\norm{e_T}_2$.
+If $e_T\ne0$, equality is attained at $u=e_T/\norm{e_T}_2$; if
+$e_T=0$, it is immediate. Also
+\begin{equation}
+\sup_{\norm{u}_2=1}u^\top\Vhat_T^{-1}u
+=\lambda_{\max}(\Vhat_T^{-1})
+=1/\lambda_{\min}(\Vhat_T).
+\label{eq:app-ellipsoid-largest-radius}
+\end{equation}
+Taking the supremum in \eqref{eq:app-directional-proof} gives
+\begin{equation}
+\norm{e_T}_2\le\frac{\beta_N(\delta)}
+{\sqrt{\lambda_{\min}(\Vhat_T)}}.
+\label{eq:app-euclidean-ellipsoid}
+\end{equation}
+When $\varepsilon_{N,m}(\delta)<\gamma^\star$, the first inequality
+of \eqref{eq:information-rate} gives
+$\lambda_{\min}(\Vhat_T)\ge
+N(\gamma^\star-\varepsilon_{N,m}(\delta))>0$.
+Substitution proves \eqref{eq:l2-confidence}. Consistency is already
+established in \eqref{eq:app-probability-one} independently of this
+rate simplification.
+\end{proof}
+
+\subsection{Proofs of Proposition 3 and the Adaptive Risk Lower Bound}
+\label{app:lower}
+
+\begin{proof}[Proof of \cref{prop:risk-lower}]
+\textit{Step 1: identify the likelihood of the adaptive experiment.}
+Write $\pi_t(d\mathcal B_t\mid\mathcal D_{t-1})$ for a policy's
+conditional batch-selection kernel. Let $\zeta$ denote the reference
+measure for a single GLM response (counting or Lebesgue measure as
+appropriate). On a realized history, the joint law factors as
+\begin{equation}
+d\Prob_\theta^\pi
+=\prod_{t=1}^T\left\{
+ \pi_t(d\mathcal B_t\mid\mathcal D_{t-1})
+ \prod_{j=1}^mp_\theta(Y_{t,j}\mid x_{t,j})\,d\zeta(Y_{t,j})
+\right\}.
+\label{eq:app-adaptive-factorization}
+\end{equation}
+The kernels may be randomized but have no separate dependence on
+$\theta$. Regularity and common response support therefore give the
+likelihood ratio, almost surely under $\theta^\star$,
+\begin{align}
+\frac{d\Prob_\theta^\pi}{d\Prob_{\theta^\star}^\pi}
+&=\prod_{i=1}^N\frac{p_\theta(Y_i\mid x_i)}
+{p_{\theta^\star}(Y_i\mid x_i)}\notag\\
+&=\exp\!\left\{\sum_{i=1}^N
+\big[Y_ix_i^\top(\theta-\theta^\star)
+-A(x_i^\top\theta)+A(x_i^\top\theta^\star)\big]\right\}.
+\label{eq:app-adaptive-ratio-general}
+\end{align}
+For a fixed realized history, the policy factors cancel. The data
+history is not differentiated through the query-selection algorithm.
+Differentiating the log ratio at $\theta^\star$ gives $U_N$.
+By \eqref{eq:app-score-cov}, the Fisher information of the entire
+experiment is
+\begin{equation}
+\mathcal J_T^\pi=\E[U_NU_N^\top]
+=\E\!\left[\sum_{i=1}^NG_{\theta^\star}(x_i)\right].
+\label{eq:app-adaptive-fisher}
+\end{equation}
+The ridge term is absent because it is not part of the response
+likelihood.
+
+\textit{Step 2: bound expected information using a feasible measure.}
+For a Borel subset $E\subseteq\mathcal X$, define the expected
+empirical measure
+\begin{equation}
+\overline\nu_N(E)=\frac1N\sum_{i=1}^N\Prob_{\theta^\star}(x_i\in E).
+\label{eq:app-expected-measure}
+\end{equation}
+Each summand is a probability measure, so $\overline\nu_N$ is one.
+Linearity of integration yields
+\begin{equation}
+M(\overline\nu_N)
+=\frac1N\sum_{i=1}^N\E[G_{\theta^\star}(x_i)]
+=\frac{\mathcal J_T^\pi}{N}.
+\label{eq:app-expected-feasible-information}
+\end{equation}
+Since $\overline\nu_N$ is feasible,
+\begin{equation}
+\lambda_{\min}(\mathcal J_T^\pi)
+=N\lambda_{\min}(M(\overline\nu_N))\le N\gamma^\star.
+\label{eq:app-expected-information-ceiling}
+\end{equation}
+No equality between $\lambda_{\min}(\E Z_N)$ and
+$\E\lambda_{\min}(Z_N)$ is used.
+
+\textit{Step 3: state precisely the estimator differentiation condition.}
+For the competing estimator, define
+$\widetilde e_T=\widetilde\theta_T-\theta^\star$ and
+$\widetilde Q_T=\E[\widetilde e_T\widetilde e_T^\top]$.
+The likelihood-differentiation condition in the main text is the
+finite-horizon identity
+\begin{equation}
+D_T=\nabla_\theta\E_\theta[\widetilde\theta_T]\big|_{\theta=\theta^\star}
+=\E_{\theta^\star}[\widetilde\theta_TU_N^\top]
+=\E_{\theta^\star}[\widetilde e_TU_N^\top].
+\label{eq:app-mean-score-identity}
+\end{equation}
+The last equality uses $\E U_N=0$. For arbitrary competing estimators,
+this interchange of differentiation and integration is an explicit
+condition, not a consequence of finite second moments alone.
+For the proposed bounded ridge MLE it will be proved in
+\cref{app:mean-derivative}.
+
+\textit{Step 4: use a scalar information inequality without inversion.}
+Choose a unit minimum eigenvector $v$ of $\mathcal J_T^\pi$.
+If $D_Tv=0$, then $s_{\min}(D_T)=0$ and the claimed lower bound is
+zero. Otherwise let $u=D_Tv/\norm{D_Tv}_2$. From
+\eqref{eq:app-mean-score-identity},
+\begin{align}
+\norm{D_Tv}_2
+&=u^\top D_Tv
+=\E[(u^\top\widetilde e_T)(v^\top U_N)],\notag\\
+\norm{D_Tv}_2^2
+&\le\E[(u^\top\widetilde e_T)^2]\E[(v^\top U_N)^2]\notag\\
+&=(u^\top\widetilde Q_Tu)(v^\top\mathcal J_T^\pi v)\notag\\
+&\le\lambda_{\max}(\widetilde Q_T)
+\lambda_{\min}(\mathcal J_T^\pi)
+\le\lambda_{\max}(\widetilde Q_T)N\gamma^\star.
+\label{eq:app-cr-direction}
+\end{align}
+Since $\norm{D_Tv}_2\ge s_{\min}(D_T)$ and
+$\lambda_{\max}(\widetilde Q_T)
+=\mathfrak R_{\mathrm{dir},T}(\widetilde\theta_T)^2$,
+\eqref{eq:risk-lower-general} follows. This argument includes singular
+$\mathcal J_T^\pi$: its inverse is never taken. In particular, a zero
+information eigenvalue forces $D_Tv=0$ through the same inequality.
+
+\textit{Step 5: derive the stated comparison classes.}
+Local unbiasedness supplies $D_T=I$, so $s_{\min}(D_T)=1$ and
+\eqref{eq:risk-lower} follows. If $D_T\to I$, then for every unit $v$,
+\begin{equation}
+1-\norm{D_T-I}_{\op}\le\norm{D_Tv}_2
+\le1+\norm{D_T-I}_{\op}.
+\label{eq:app-smallest-singular-limit}
+\end{equation}
+Taking the infimum over $v$ gives $s_{\min}(D_T)\to1$. Multiplication
+of \eqref{eq:risk-lower-general} by $N\gamma^\star=T\gstar$ and
+taking the lower limit proves \eqref{eq:asymptotic-lower}.
+No finite-sample unbiasedness is imposed on the proposed estimator.
+\end{proof}
+
+\subsection{Proofs of Proposition 4 and Sharp Risk Attainment}
+\label{app:risk}
+
+In this subsection alone, $m$ is fixed, $\theta^\star$ is interior,
+and the optimal information matrix $M^\star$ is unique as specified
+in \cref{sec:sharp-risk}. Since $\lambda_{\min}(M^\star)=\gamma^\star>0$,
+its inverse is well-defined. All counts below are completed counts
+$N=mT$. The proof establishes the matrix MSE limit, its risk
+consequences, and the mean-Jacobian claim after the proposition.
+
+\subsubsection{Stabilization of information and the integrated Hessian}
+
+Work first on the probability-one event from
+\eqref{eq:app-probability-one}. The unregularized averages
+$(Z_N-\rho I)/N$ all belong to the compact set $\mathcal C$ of
+\eqref{eq:app-feasible-matrices}. Their minimum eigenvalues converge
+to $\gamma^\star$. If a subsequence of these matrices converges to
+$M_\infty$, continuity of the minimum eigenvalue gives
+\begin{equation}
+M_\infty\in\mathcal C,\qquad
+\lambda_{\min}(M_\infty)=
+\lim\lambda_{\min}((Z_N-\rho I)/N)=\gamma^\star.
+\label{eq:app-optimal-cluster-point}
+\end{equation}
+By matrix uniqueness, $M_\infty=M^\star$.
+To see that the full sequence converges, suppose it did not: there
+would be an $\epsilon>0$ and a subsequence at distance at least
+$\epsilon$ from $M^\star$. Compactness would supply a convergent
+further subsequence, whose limit would be both optimal and at that
+distance, a contradiction. Hence
+\begin{equation}
+Z_N/N\longrightarrow M^\star\qquad\text{a.s.}
+\label{eq:app-matrix-stabilization}
+\end{equation}
+The vanishing ridge $\rho I/N$ does not change the limit.
+This cluster-point argument is the use of uniqueness; it is not
+assumed in the information-growth theorem.
+
+For the integrated Hessian in \eqref{eq:app-integrated-hessian},
+\begin{align}
+\norm{K_N-Z_N}_{\op}
+&\le\sum_{i=1}^N\int_0^1
+ |w_{\theta^\star+s e_T}(x_i)-w_{\theta^\star}(x_i)|
+ \norm{x_i}_2^2\,ds\notag\\
+&\le\sum_{i=1}^N\int_0^1L_A s|x_i^\top e_T|\norm{x_i}_2^2\,ds
+\le\frac12NC_F\norm{e_T}_2.
+\label{eq:app-hessian-error}
+\end{align}
+Consistency and \eqref{eq:app-initial-tracking} therefore imply
+\begin{equation}
+K_N/N\to M^\star,
+\qquad\Vhat_T/N\to M^\star
+\qquad\text{a.s.}
+\label{eq:app-hessian-stabilization}
+\end{equation}
+Choose $r_\theta>0$ so that the open ball with center $\theta^\star$
+and radius $r_\theta$ is contained in $\operatorname{int}\Theta$.
+Define the interior-estimate event
+\begin{equation}
+\mathcal I_N=\{\widehat\theta_T\in\operatorname{int}\Theta\}.
+\label{eq:app-interior-event}
+\end{equation}
+Because $\norm{e_T}_2<r_\theta$ implies $\mathcal I_N$, consistency
+also shows that this event occurs eventually on almost every path.
+
+\subsubsection{Fourth moment of the normalized score}
+
+For an arbitrary deterministic vector $v\in\R^d$, repeated
+conditioning in \eqref{eq:app-predictable-noise} gives, for $a\in\R$,
+\begin{align}
+\E[e^{a v^\top U_n}]
+&=\E\!\left[e^{a v^\top U_{n-1}}
+ \E[e^{a(v^\top x_n)\xi_n}\mid\mathscr F_{n-1}]\right]\notag\\
+&\le\E\!\left[e^{a v^\top U_{n-1}}
+ e^{a^2\sigma^2(v^\top x_n)^2/2}\right]\notag\\
+&\le e^{a^2\sigma^2L^2\norm{v}_2^2/2}
+ \E[e^{a v^\top U_{n-1}}]\notag\\
+&\le e^{a^2\sigma^2nL^2\norm{v}_2^2/2}.
+\label{eq:app-score-mgf}
+\end{align}
+Let $s_N=U_N/\sqrt N$ denote the normalized score. For coordinate
+$r$, exponential Markov inequality, optimized over $a>0$, gives
+\begin{equation}
+\Prob(|(U_N)_r|\ge u)
+\le2\exp\!\left(-\frac{u^2}{2\sigma^2NL^2}\right)
+\qquad(u>0).
+\label{eq:app-coordinate-tail}
+\end{equation}
+For a nonnegative random variable, the tail integral formula follows
+from integrating its pointwise indicator and applying Tonelli's
+theorem. With $v_N=\sigma^2NL^2$, it yields
+\begin{align}
+\E[(U_N)_r^4]
+&=\int_0^\infty4u^3\Prob(|(U_N)_r|>u)\,du\notag\\
+&\le8\int_0^\infty u^3e^{-u^2/(2v_N)}\,du
+=16v_N^2\int_0^\infty z e^{-z}\,dz
+=16v_N^2.
+\label{eq:app-coordinate-fourth}
+\end{align}
+The substitution is $z=u^2/(2v_N)$, for which
+$u^3du=2v_N^2z\,dz$.
+Since $(\sum_ra_r^2)^2\le d\sum_ra_r^4$,
+\begin{equation}
+\E\norm{s_N}_2^4
+\le\frac d{N^2}\sum_{r=1}^d\E[(U_N)_r^4]
+\le C_4,\qquad C_4=16d^2\sigma^4L^4.
+\label{eq:app-score-fourth}
+\end{equation}
+In particular $\E\norm{s_N}_2^2\le C_4^{1/2}$ by Cauchy--Schwarz.
+
+\subsubsection{Fourth moment of the normalized estimation error}
+
+Define the well-conditioned event and a positive Hessian constant by
+\begin{equation}
+\mathcal G_N=\{\lambda_{\min}(Z_N)\ge N\gamma^\star/2\},
+\qquad c_K=\frac{a_0\gamma^\star}{2b_0}.
+\label{eq:app-good-event}
+\end{equation}
+For $N\ge2$, apply \cref{thm:information} with
+$\delta_N=N^{-6}$. Since $m$ is fixed,
+\begin{equation}
+\varepsilon_{N,m}(N^{-6})
+=C\left[\frac{1+7\log N}{N^{1/4}}+\frac mN\right]\to0.
+\label{eq:app-polynomial-confidence}
+\end{equation}
+There is therefore a deterministic threshold $N_0=N_0(m)\ge2$ such
+that, for every completed $N\ge N_0$,
+\begin{equation}
+\Prob(\mathcal G_N^c)\le N^{-6}.
+\label{eq:app-rare-information}
+\end{equation}
+Indeed the theorem's event at that $N$ implies
+\eqref{eq:app-refined-information}. The varying choice $\delta_N$
+is used only for this marginal probability estimate; no claim that
+all these confidence events hold together is required here.
+
+From $K_N\succeq a_0H_N$ and $Z_N\preceq b_0H_N$,
+\begin{equation}
+K_N\succeq(a_0/b_0)Z_N\succeq c_KNI
+\qquad\text{on }\mathcal G_N.
+\label{eq:app-good-hessian}
+\end{equation}
+Combining this with the constrained inequality
+\eqref{eq:app-variational} yields
+\begin{align}
+c_KN\norm{e_T}_2^2
+&\le e_T^\top K_Ne_T
+\le e_T^\top(U_N-\rho\theta^\star)
+\le\norm{e_T}_2\norm{U_N-\rho\theta^\star}_2,\notag\\
+\norm{\sqrt N e_T}_2
+&\le c_K^{-1}\norm{s_N-\rho\theta^\star/\sqrt N}_2
+\qquad\text{on }\mathcal G_N.
+\label{eq:app-euclidean-score-bound}
+\end{align}
+As before, the zero-error case needs no division. This estimate is
+valid even when the minimizer is on the boundary.
+
+Let $z_N=\sqrt N e_T$ denote the scaled error. Using
+$(a+b)^4\le8(a^4+b^4)$ and \eqref{eq:app-score-fourth},
+\begin{equation}
+\E[\norm{z_N}_2^4\mathbf1_{\mathcal G_N}]
+\le8c_K^{-4}\left(C_4+\frac{\rho^4S^4}{N^2}\right).
+\label{eq:app-good-estimator-fourth}
+\end{equation}
+On $\mathcal G_N^c$, compactness of $\Theta$ gives
+$\norm{z_N}_2^4\le16S^4N^2$, so for $N\ge N_0$,
+\begin{equation}
+\E[\norm{z_N}_2^4\mathbf1_{\mathcal G_N^c}]
+\le16S^4N^2\Prob(\mathcal G_N^c)
+\le16S^4N^{-4}.
+\label{eq:app-bad-estimator-fourth}
+\end{equation}
+For the finitely many completed $N<N_0$, use the bound
+$16S^4N_0^2$. For example, the finite constant
+\begin{equation}
+C_e=\max\left\{
+8c_K^{-4}(C_4+\rho^4S^4)+16S^4,\;16S^4N_0^2\right\}
+\label{eq:app-estimator-moment-constant}
+\end{equation}
+satisfies
+\begin{equation}
+\sup_{T\ge1}\E\norm{\sqrt{mT}e_T}_2^4\le C_e.
+\label{eq:app-estimator-fourth}
+\end{equation}
+This is a proved bound, not an assumption. In particular, for $K>0$,
+\begin{equation}
+\sup_T\E\!\left[\norm{z_N}_2^2
+\mathbf1_{\{\norm{z_N}_2^2>K\}}\right]
+\le\frac1K\sup_T\E\norm{z_N}_2^4\le C_e/K\to0,
+\label{eq:app-uniform-integrability}
+\end{equation}
+which explicitly verifies uniform integrability of the squared
+scaled errors.
+
+\subsubsection{Mean-square linearization including exceptional events}
+
+On $\mathcal I_N$ the constrained minimizer is interior, so its gradient
+vanishes. Equation \eqref{eq:app-gradient-expansion} then becomes
+\begin{equation}
+K_Ne_T=U_N-\rho\theta^\star
+\qquad\text{on }\mathcal I_N.
+\label{eq:app-interior-score}
+\end{equation}
+Define the normalized Hessian $\overline K_N=K_N/N$, the intersection
+$\mathcal A_N=\mathcal G_N\cap\mathcal I_N$, and the linearization
+remainder
+\begin{equation}
+r_N=z_N-(M^\star)^{-1}s_N.
+\label{eq:app-remainder-definition}
+\end{equation}
+Our aim is $\E\norm{r_N}_2^2\to0$, not merely convergence in
+probability.
+
+On $\mathcal A_N$, \eqref{eq:app-interior-score} gives
+\begin{equation}
+r_N=[\overline K_N^{-1}-(M^\star)^{-1}]s_N
+-\overline K_N^{-1}\frac{\rho\theta^\star}{\sqrt N}.
+\label{eq:app-remainder-on-good}
+\end{equation}
+The inverse difference has the exact identity
+\begin{equation}
+\overline K_N^{-1}-(M^\star)^{-1}
+=\overline K_N^{-1}(M^\star-\overline K_N)(M^\star)^{-1}.
+\label{eq:app-inverse-difference}
+\end{equation}
+On $\mathcal G_N$, \eqref{eq:app-good-hessian} gives
+$\norm{\overline K_N^{-1}}_{\op}\le c_K^{-1}$; also
+$\norm{(M^\star)^{-1}}_{\op}=1/\gamma^\star$.
+Define the truncated difference
+$\Delta_N=\mathbf1_{\mathcal A_N}
+[\overline K_N^{-1}-(M^\star)^{-1}]$.
+Then
+\begin{equation}
+\norm{\Delta_N}_{\op}\le c_K^{-1}+1/\gamma^\star,
+\qquad
+\Delta_N\to0\quad\text{a.s.}
+\label{eq:app-truncated-inverse}
+\end{equation}
+The convergence follows from \eqref{eq:app-hessian-stabilization} and
+\eqref{eq:app-inverse-difference}; the indicator cannot enlarge a
+vanishing inverse difference. The displayed deterministic bound
+justifies dominated convergence, giving
+$\E\norm{\Delta_N}_{\op}^4\to0$.
+Cauchy--Schwarz applied to the product in
+\eqref{eq:app-remainder-on-good} yields
+\begin{align}
+\E[\norm{r_N}_2^2\mathbf1_{\mathcal A_N}]
+&\le2\E[\norm{\Delta_N}_{\op}^2\norm{s_N}_2^2]
++\frac{2\rho^2S^2}{c_K^2N}\notag\\
+&\le2(\E\norm{\Delta_N}_{\op}^4)^{1/2}C_4^{1/2}
++\frac{2\rho^2S^2}{c_K^2N}\longrightarrow0.
+\label{eq:app-good-remainder-l2}
+\end{align}
+
+It remains to control the whole complement, including boundary
+estimates. From \eqref{eq:app-remainder-definition},
+\begin{equation}
+\E\norm{r_N}_2^4
+\le8\big(\E\norm{z_N}_2^4+
+ (\gamma^\star)^{-4}\E\norm{s_N}_2^4\big)
+\le C_r,\qquad C_r=8(C_e+(\gamma^\star)^{-4}C_4).
+\label{eq:app-remainder-fourth}
+\end{equation}
+The chosen interior radius and Markov's inequality imply
+\begin{equation}
+\Prob(\mathcal I_N^c)
+\le\Prob(\norm{e_T}_2\ge r_\theta)
+\le\frac{\E\norm{z_N}_2^4}{N^2r_\theta^4}
+\le\frac{C_e}{N^2r_\theta^4}.
+\label{eq:app-boundary-probability}
+\end{equation}
+For $N\ge N_0$, combine this with
+\eqref{eq:app-rare-information} and Cauchy--Schwarz:
+\begin{align}
+\E[\norm{r_N}_2^2\mathbf1_{\mathcal A_N^c}]
+&\le(\E\norm{r_N}_2^4)^{1/2}
+\Prob(\mathcal A_N^c)^{1/2}\notag\\
+&\le C_r^{1/2}\left(N^{-6}+
+\frac{C_e}{N^2r_\theta^4}\right)^{1/2}\longrightarrow0.
+\label{eq:app-bad-remainder-l2}
+\end{align}
+Adding \eqref{eq:app-good-remainder-l2} and
+\eqref{eq:app-bad-remainder-l2} proves
+\begin{equation}
+\E\left\|\sqrt N e_T-(M^\star)^{-1}\frac{U_N}{\sqrt N}\right\|_2^2
+=\E\norm{r_N}_2^2\longrightarrow0.
+\label{eq:app-l2-linearization}
+\end{equation}
+No central limit theorem or unproved moment interchange appears in
+this argument.
+
+\subsubsection{Matrix MSE and the two risk constants}
+
+Since $\norm{(Z_N-\rho I)/N}_{\op}\le B$, matrix stabilization and
+bounded convergence give
+\begin{equation}
+\E[s_Ns_N^\top]
+=\E[(Z_N-\rho I)/N]\longrightarrow M^\star.
+\label{eq:app-score-second-limit}
+\end{equation}
+More explicitly,
+$\|\E[(Z_N-\rho I)/N]-M^\star\|_{\op}$ is at most
+$\E\|(Z_N-\rho I)/N-M^\star\|_{\op}$, which tends to zero by
+dominated convergence with upper bound $2B$.
+
+Set $b_N^\star=(M^\star)^{-1}s_N$ for this paragraph.
+Then $z_N=b_N^\star+r_N$, and expansion gives
+\begin{align}
+NQ_T
+=\E[z_Nz_N^\top]
+={}&(M^\star)^{-1}\E[s_Ns_N^\top](M^\star)^{-1}\notag\\
+&+\E[b_N^\star r_N^\top]
++\E[r_N(b_N^\star)^\top]+\E[r_Nr_N^\top].
+\label{eq:app-mse-expansion}
+\end{align}
+The last three terms vanish in operator norm. Indeed,
+\begin{align}
+\norm{\E[r_Nr_N^\top]}_{\op}
+&\le\E\norm{r_N}_2^2\to0,\notag\\
+\norm{\E[b_N^\star r_N^\top]}_{\op}
+&\le\E[\norm{b_N^\star}_2\norm{r_N}_2]\notag\\
+&\le\frac1{\gamma^\star}
+(\E\norm{s_N}_2^2)^{1/2}(\E\norm{r_N}_2^2)^{1/2}
+\le\frac{C_4^{1/4}}{\gamma^\star}
+(\E\norm{r_N}_2^2)^{1/2}\to0.
+\label{eq:app-mse-cross-terms}
+\end{align}
+The transposed cross term has the same norm. Thus
+\begin{equation}
+NQ_T\longrightarrow(M^\star)^{-1}M^\star(M^\star)^{-1}
+=(M^\star)^{-1}.
+\label{eq:app-mse-limit}
+\end{equation}
+This proves the formal statement of \cref{prop:efficiency}.
+Because $N=mT$ and $J^\star=mM^\star$,
+\begin{equation}
+TQ_T=(NQ_T)/m\longrightarrow (M^\star)^{-1}/m=(J^\star)^{-1}.
+\label{eq:app-per-round-mse}
+\end{equation}
+Continuity of the largest eigenvalue and trace, and the risk identities
+in \eqref{eq:risk-matrix}, now yield
+\begin{align}
+T\gstar\,\Rdir^2
+&=\gstar\lambda_{\max}(TQ_T)
+\longrightarrow\gstar\lambda_{\max}((J^\star)^{-1})=1,\notag\\
+T\Rtwo^2
+&=\tr(TQ_T)\longrightarrow\tr((J^\star)^{-1}).
+\label{eq:app-risk-constant-calculation}
+\end{align}
+For completeness, the continuity bounds are
+$|\lambda_{\max}(A_1)-\lambda_{\max}(A_2)|
+\le\norm{A_1-A_2}_{\op}$ and
+$|\tr(A_1-A_2)|\le d\norm{A_1-A_2}_{\op}$.
+If $\lambda_1,\ldots,\lambda_d$ are the eigenvalues of $J^\star$,
+then $\min_r\lambda_r=\gstar$, so
+\begin{equation}
+\frac1{\gstar}\le\sum_{r=1}^d\frac1{\lambda_r}
+=\tr((J^\star)^{-1})\le\frac d{\gstar}.
+\label{eq:app-trace-risk-range}
+\end{equation}
+These computations identify the Euclidean constant but do not say
+that an E-optimal design minimizes the trace among all designs.
+
+\subsubsection{Differentiating the proposed estimator's mean}
+\label{app:mean-derivative}
+
+We now prove the remaining comparison-class assertion for the ridge
+MLE. Fix a finite completed horizon $N$. The policy and estimator are
+held fixed as the statistical parameter varies. For a vector
+$h\in\R^d$ with $\norm{h}_2<r_\theta$, define the likelihood ratio
+$L_N(h)=d\Prob_{\theta^\star+h}/d\Prob_{\theta^\star}$.
+The factorization \eqref{eq:app-adaptive-ratio-general} gives
+\begin{equation}
+L_N(h)=\exp\{h^\top U_N-R_N(h)\},
+\label{eq:app-likelihood-ratio}
+\end{equation}
+where the scalar Taylor remainder is
+\begin{equation}
+R_N(h)=\sum_{i=1}^N
+\left[A(x_i^\top\theta^\star+x_i^\top h)
+-A(x_i^\top\theta^\star)-A'(x_i^\top\theta^\star)x_i^\top h\right].
+\label{eq:app-likelihood-remainder}
+\end{equation}
+Taylor's formula in integral form yields
+\begin{align}
+R_N(h)
+&=\sum_{i=1}^N\int_0^1(1-s)
+ w_{\theta^\star+sh}(x_i)(x_i^\top h)^2\,ds,\notag\\
+0\le R_N(h)&\le\tfrac12NB\norm{h}_2^2,\notag\\
+\nabla_h R_N(h)
+&=\sum_{i=1}^N\int_0^1
+ w_{\theta^\star+sh}(x_i)x_ix_i^\top h\,ds,\notag\\
+\norm{\nabla_hR_N(h)}_2&\le NB\norm{h}_2.
+\label{eq:app-likelihood-remainder-bounds}
+\end{align}
+All intermediate parameters belong to $\Theta$ by the choice of
+radius. Therefore, for a fixed $r_0\in(0,r_\theta)$ and
+$\norm{h}_2\le r_0$,
+\begin{equation}
+\norm{\nabla_hL_N(h)}_2
+=L_N(h)\norm{U_N-\nabla_hR_N(h)}_2
+\le e^{r_0\norm{U_N}_2}(\norm{U_N}_2+NBr_0).
+\label{eq:app-derivative-envelope}
+\end{equation}
+We verify that this envelope is integrable rather than assume it.
+For any $a>0$, the scalar inequalities
+$\norm{U_N}_2\le\sum_r|(U_N)_r|$ and
+$e^{a|x|}\le e^{ax}+e^{-ax}$ imply
+\begin{align}
+\E e^{a\norm{U_N}_2}
+&\le\sum_{v\in\{-1,1\}^d}\E e^{a v^\top U_N}
+\le2^d\exp(a^2\sigma^2NL^2d/2)<\infty.
+\label{eq:app-vector-exponential-envelope}
+\end{align}
+Here \eqref{eq:app-score-mgf} applies since $\norm{v}_2^2=d$.
+For $u\ge0$, $u\le e^u$, so
+\begin{equation}
+e^{r_0u}(u+NBr_0)
+\le(1+NBr_0)e^{(r_0+1)u}.
+\label{eq:app-envelope-integrable}
+\end{equation}
+Equations \eqref{eq:app-vector-exponential-envelope} and
+\eqref{eq:app-envelope-integrable} prove integrability of
+\eqref{eq:app-derivative-envelope} at this fixed horizon.
+
+At $h=0$, $L_N(0)=1$ and $\nabla_hL_N(0)=U_N$.
+The fundamental theorem of calculus along the line segment gives
+\begin{equation}
+\frac{|L_N(h)-1-h^\top U_N|}{\norm{h}_2}
+\le\int_0^1\norm{\nabla_hL_N(sh)-U_N}_2\,ds
+\longrightarrow0\quad(h\to0)
+\label{eq:app-frechet-likelihood}
+\end{equation}
+on each path. The right side is bounded by the integrable envelope in
+\eqref{eq:app-derivative-envelope} plus $\norm{U_N}_2$.
+Because $\norm{\widehat\theta_T}_2\le S$, dominated convergence
+therefore shows the vector-valued Fr\'echet expansion
+\begin{align}
+a_T(\theta^\star+h)
+&=\E_{\theta^\star}[\widehat\theta_T L_N(h)]\notag\\
+&=a_T(\theta^\star)
+ +\E_{\theta^\star}[\widehat\theta_TU_N^\top]h
+ +o(\norm{h}_2).
+\label{eq:app-mean-differentiation-expansion}
+\end{align}
+Thus the mean Jacobian exists and satisfies
+\begin{equation}
+D_T=\E[\widehat\theta_TU_N^\top]=\E[e_TU_N^\top],
+\label{eq:app-mle-mean-derivative}
+\end{equation}
+where the second equality uses $\E U_N=0$.
+This establishes the differentiation identity for each finite $T$
+before any asymptotic limit is taken.
+
+Finally, substitute $z_N=(M^\star)^{-1}s_N+r_N$ into this identity:
+\begin{align}
+D_T
+&=\E[z_Ns_N^\top]
+=(M^\star)^{-1}\E[s_Ns_N^\top]+\E[r_Ns_N^\top],\notag\\
+\norm{\E[r_Ns_N^\top]}_{\op}
+&\le(\E\norm{r_N}_2^2)^{1/2}
+ (\E\norm{s_N}_2^2)^{1/2}\longrightarrow0.
+\label{eq:app-derivative-remainder}
+\end{align}
+Using \eqref{eq:app-score-second-limit},
+\begin{equation}
+D_T\longrightarrow(M^\star)^{-1}M^\star=I.
+\label{eq:app-derivative-limit}
+\end{equation}
+The same linearization also gives
+\begin{equation}
+\norm{\sqrt N\,\E e_T}_2
+=\norm{\E r_N}_2
+\le(\E\norm{r_N}_2^2)^{1/2}\longrightarrow0,
+\label{eq:app-asymptotic-bias}
+\end{equation}
+since $\E s_N=0$. Finite-sample unbiasedness is not asserted.
+Together with \cref{prop:risk-lower}, the established mean-Jacobian
+limit and the sharp directional limit prove attainment within the
+stated comparison class. This completes all claims accompanying
+\cref{prop:efficiency}.
+
+\subsection{Details of the Alternative Temperature Schedule}
+\label{app:temperature}
+
+The preceding results use $\tau_t=\tau_0(mt)^{3/4}$. The alternative
+$\tau_t=\tau_0t^{3/4}$ has the same fixed-$m$ schedule family after
+rescaling its free coefficient, but is a different numerical policy
+when $\tau_0$ is held fixed across batch sizes. We give the full rate
+calculation for this alternative rather than identifying the two
+schedules without qualification.
+
+Because $\tau_0t^{3/4}\le\tau_0(mt)^{3/4}$, the excitation proof still
+holds with the same $c_E,N_E$. The confidence and preliminary
+localization proofs do not otherwise use the temperature, so the
+same $C_L$ applies. For the round-scaled schedule,
+\begin{align}
+\tau_T&=\tau_0T^{3/4}=\tau_0m^{-3/4}N^{3/4},\notag\\
+m\sum_{t=1}^T\frac1{\tau_t}
+&\le\frac{4m}{\tau_0}T^{1/4}
+=\frac4{\tau_0}m^{3/4}N^{1/4},\notag\\
+\frac{n_{t,j}}{\tau_t}
+&\le\frac{mt}{\tau_0t^{3/4}}
+=\tau_0^{-1}m^{3/4}(mt)^{1/4}.
+\label{eq:app-round-scaled-components}
+\end{align}
+For $t\ge2$, the unchanged localization estimate now gives
+\begin{equation}
+\ell_{t,j}\le C_s\Lambda_N
+\left[(mt)^{-1/2}+\frac{2B}{\tau_0}m^{3/4}(mt)^{-1/4}\right].
+\label{eq:app-round-scaled-loss}
+\end{equation}
+Summing exactly as in \eqref{eq:app-power-sums} yields
+\begin{equation}
+\sum_{t=1}^T\sum_{j=1}^m\ell_{t,j}
+\le Bm+2C_s\Lambda_NN^{1/2}
++\frac{8BC_s}{3\tau_0}m^{3/4}\Lambda_NN^{3/4}.
+\label{eq:app-round-scaled-loss-sum}
+\end{equation}
+Substitution into the same master inequality
+\eqref{eq:app-master-gap}, followed by division by $N$, gives
+\begin{align}
+0\le\frac{\rho+N\gamma^\star-\lambda_{\min}(Z_N)}N
+\le{}&\tau_0\log d\,m^{-3/4}N^{-1/4}
++\frac{4B^2}{\tau_0}m^{3/4}N^{-3/4}+B\frac mN\notag\\
+&+2C_s\Lambda_NN^{-1/2}
++\frac{8BC_s}{3\tau_0}m^{3/4}\Lambda_NN^{-1/4}.
+\label{eq:app-round-scaled-decomposition}
+\end{align}
+Terminal plug-in error is still at most
+$C_FC_L\Lambda_N/\sqrt N$ after normalization, by
+\eqref{eq:app-initial-tracking}. Since $m\ge1$, $N\ge1$, and
+$\Lambda_N\ge1$, the constant in \eqref{eq:app-main-constant}
+(or a larger constant independent of $m$) bounds both rate errors by
+\begin{equation}
+\varepsilon^{\mathrm{round}}_{N,m}(\delta)
+=C\left[m^{3/4}\frac{\log(eN/\delta)}{N^{1/4}}+\frac mN\right].
+\label{eq:app-old-schedule-bound}
+\end{equation}
+For fixed $m$, this bound vanishes. Once it is at most
+$\gamma^\star/2$, the refined localization calculation
+\eqref{eq:app-refined-localization} applies unchanged. The
+probability-one argument, matrix stabilization, fourth moments,
+mean-square linearization, and mean differentiation then proceed
+with this alternative rate error; for the fourth-moment proof,
+$\varepsilon^{\mathrm{round}}_{N,m}(N^{-6})\to0$ for fixed $m$.
+Thus the same fixed-$m$ asymptotic conclusions are retained.
+
+Neither temperature analysis proves the zero-temperature hard policy,
+an approximate finite-candidate oracle, a finite pool merely contained
+in the ball, misspecified responses, or general Poisson noise under
+the stated sub-Gaussian condition. These are not being introduced as
+silent extensions of the theorem's scope.
+
+\subsection{Range-Based Finite-Budget Temperature Calibration}
+\label{app:range-calibration}
+
+This subsection derives the constant $1/8$ in the range-based
+reference temperature and explains the prescribed-budget calibration
+in \eqref{eq:temperature}. The resulting optimization statement
+concerns a spectral-smoothing penalty within a specified schedule
+family, not the estimation error of the resulting adaptive policy.
+
+\subsubsection{A range-dependent potential increment}
+
+For this derivation, let $R>0$ bound the spectrum of each information
+increment: an increment $D$ satisfies $0\preceq D\preceq RI$.
+We use the Gibbs matrix $P_\tau$ and potential $\Phi_\tau$ defined
+in \eqref{eq:gibbs} and \eqref{eq:potential}.
+
+\begin{lemma}[Range-dependent potential increment]
+\label{lem:range-potential-increment}
+For every symmetric matrix $A$, every $D$ satisfying
+$0\preceq D\preceq RI$, and every $\tau>0$,
+\begin{equation}
+\Phi_\tau(A+D)-\Phi_\tau(A)
+\ge
+\tr\!\left(P_\tau(A)D\right)-\frac{R^2}{8\tau}.
+\label{eq:range-potential-increment}
+\end{equation}
+No commutation between $A$ and $D$ is required.
+\end{lemma}
+
+\begin{proof}
+Write $z_A=\tr e^{-A/\tau}$ and $P=P_\tau(A)$.
+The Golden--Thompson inequality \citep{Golden1965,Thompson1965}
+gives
+\begin{equation}
+\frac{\tr e^{-(A+D)/\tau}}{z_A}
+\le
+\frac{\tr\!\left(e^{-A/\tau}e^{-D/\tau}\right)}{z_A}
+=
+\tr\!\left(Pe^{-D/\tau}\right).
+\label{eq:range-golden-thompson}
+\end{equation}
+Let $r_1,\ldots,r_d\in[0,R]$ be the eigenvalues of $D$, with
+orthonormal eigenvectors $v_1,\ldots,v_d$. Define
+$q_k=v_k^\top Pv_k$. These numbers are nonnegative and sum to one.
+Consequently,
+\begin{equation}
+\tr\!\left(Pe^{-D/\tau}\right)
+=\sum_{k=1}^d q_k e^{-r_k/\tau},
+\qquad
+\tr(PD)=\sum_{k=1}^d q_k r_k.
+\end{equation}
+Hoeffding's lemma \citep{Hoeffding1963}, applied to the scalar
+random variable taking value $r_k$ with probability $q_k$, yields
+\begin{equation}
+\log\!\left(\sum_{k=1}^d q_k e^{-r_k/\tau}\right)
+\le
+-\frac{\tr(PD)}{\tau}+\frac{R^2}{8\tau^2}.
+\label{eq:range-hoeffding}
+\end{equation}
+Combining the last inequality with
+\eqref{eq:range-golden-thompson} and multiplying by $-\tau$
+proves \eqref{eq:range-potential-increment}.
+\end{proof}
+
+\subsubsection{The within-batch smoothing penalty}
+
+Fix the fitted parameter during one batch. Let $W_0$ be its starting
+plug-in information matrix, let $D_j$ be the information increment
+of its $j$th selected query, and write $W_j=W_{j-1}+D_j$.
+For a fixed batch temperature $\tau$, denote the selected query's
+score by
+\begin{equation}
+s_j=\tr\!\left(P_\tau(W_{j-1})D_j\right),
+\qquad j=1,\ldots,m.
+\end{equation}
+If $0\preceq D_j\preceq RI$ for every $j$, summing
+Lemma~\ref{lem:range-potential-increment} gives
+\begin{equation}
+\Phi_\tau(W_m)-\Phi_\tau(W_0)
+\ge
+\sum_{j=1}^m s_j-\frac{mR^2}{8\tau}.
+\label{eq:range-batch-potential}
+\end{equation}
+The soft-min bracket \eqref{eq:app-soft-min-bracket} also gives
+\begin{equation}
+\lambda_{\min}(W_m)-\lambda_{\min}(W_0)
+\ge
+\Phi_\tau(W_m)-\Phi_\tau(W_0)-\tau\log d.
+\end{equation}
+Define the resulting scalar penalty by
+\begin{equation}
+\Psi_m(\tau)=\tau\log d+\frac{mR^2}{8\tau}.
+\label{eq:range-penalty}
+\end{equation}
+Then
+\begin{equation}
+\lambda_{\min}(W_m)-\lambda_{\min}(W_0)
+\ge
+\sum_{j=1}^m s_j-\Psi_m(\tau).
+\label{eq:range-batch-eigenvalue}
+\end{equation}
+This is a pathwise statement for the frozen-parameter virtual batch.
+It neither identifies $W_m$ with the information recomputed after
+refitting nor requires the query matrices to commute.
+
+For $d\ge2$, the derivatives of the penalty are
+\begin{equation}
+\Psi_m'(\tau)=\log d-\frac{mR^2}{8\tau^2},
+\qquad
+\Psi_m''(\tau)=\frac{mR^2}{4\tau^3}>0.
+\end{equation}
+Thus its unique unconstrained minimizer is
+\begin{equation}
+\tau_{\mathrm{range}}^{\circ}
+:=\argmin_{\tau>0}\Psi_m(\tau)
+=R\sqrt{\frac{m}{8\log d}}.
+\label{eq:range-unfloored-minimizer}
+\end{equation}
+In particular, the factor $1/8$ follows from the range-dependent
+exponential-moment bound, while the factor $m$ follows from summing
+one increment bound per virtual update. The numerical reference
+in \eqref{eq:temperature} is equivalently
+\begin{equation}
+\tau_{\mathrm{range}}
+=\argmin_{\tau\ge10^{-8}}\Psi_m(\tau)
+=\max\!\left\{10^{-8},\tau_{\mathrm{range}}^{\circ}\right\}.
+\end{equation}
+Minimizing this penalty alone does not maximize the full right-hand
+side of \eqref{eq:range-batch-eigenvalue}: the selected queries and
+their scores can also depend on $\tau$.
+
+Taking $R=B$ from \eqref{eq:app-constants} gives the sharper
+remainder $mB^2/(8\tau_t)$ in the true-state batch-gain argument of
+Lemma~\ref{lem:batch}, with its existing score-discrepancy terms
+unchanged. The preceding proofs retain their valid, looser remainder
+$mB^2/\tau_t$; none of their displayed constants is being silently
+replaced.
+
+\subsubsection{Calibration within a capped power-law family}
+
+The power $3/4$ retains the schedule shape used in the information-rate
+analysis. To choose its coefficient over a prescribed budget, we impose
+the design constraint that the temperature does not exceed the
+range-based reference before that budget is exhausted. This cap is a
+calibration choice, not a necessary condition of
+Theorem~\ref{thm:information}.
+
+Let $T_{\max}\ge1$ be the prescribed number of batches and
+$N_{\max}=mT_{\max}$. For a positive coefficient $c$, consider
+$\tau_t(c)=c(mt)^{3/4}$. The admissible coefficients satisfy
+\begin{equation}
+0<c\le\frac{\tau_{\mathrm{range}}}{N_{\max}^{3/4}},
+\label{eq:range-coefficient-class}
+\end{equation}
+which is equivalent to $\tau_t(c)\le\tau_{\mathrm{range}}$
+for every $1\le t\le T_{\max}$.
+
+\begin{proposition}[Coefficient calibration within the capped family]
+\label{prop:range-coefficient}
+Suppose $d\ge2$, $R>0$, and the numerical floor is inactive, so
+$\tau_{\mathrm{range}}=\tau_{\mathrm{range}}^{\circ}$.
+Among the coefficients in \eqref{eq:range-coefficient-class},
+\begin{equation}
+c_\star=\frac{\tau_{\mathrm{range}}}{N_{\max}^{3/4}}
+\end{equation}
+uniquely minimizes $\Psi_m(\tau_t(c))$ for every
+$t=1,\ldots,T_{\max}$. Its schedule is
+\begin{equation}
+\tau_t(c_\star)
+=\tau_{\mathrm{range}}
+\left(\frac{mt}{N_{\max}}\right)^{3/4}
+=\tau_{\mathrm{range}}
+\left(\frac{t}{T_{\max}}\right)^{3/4}.
+\label{eq:range-anchored-schedule}
+\end{equation}
+\end{proposition}
+
+\begin{proof}
+The schedule is increasing in $t$, so the last batch supplies the
+strongest cap and gives \eqref{eq:range-coefficient-class}.
+The function $\Psi_m$ is strictly decreasing on
+$(0,\tau_{\mathrm{range}}^{\circ}]$. For each fixed $t$, the
+largest feasible coefficient gives the largest feasible temperature
+in that interval, and therefore the smallest penalty. That
+coefficient is $c_\star$.
+\end{proof}
+
+The proposition concerns only the scalar penalty in the stated
+capped family. It does not establish optimality over unrestricted
+temperature schedules, over adaptive query sequences, or for
+Euclidean or worst-direction estimation risk.
+
+\subsubsection{Choice of range and numerical conventions}
+
+For the GLM information in \eqref{eq:fisher},
+\begin{equation}
+\norm{G_\theta(x)}_{\op}
+=w_\theta(x)\norm{x}_2^2.
+\end{equation}
+Hence a valid uniform choice for the preceding range-bound derivation
+is $R=\overline wL^2$ under the radius and curvature conditions in
+Section~\ref{sec:conditions}. On unit-radius pools, one may take
+$R=1$ for unit-variance Gaussian responses and $R=1/4$ for
+Bernoulli-logistic responses.
+
+For an unnormalized finite pool, let
+$L_{\mathcal X}=\max_{x\in\mathcal X}\norm{x}_2$ be its actual
+radius. The corresponding sufficient range bounds are
+$R=L_{\mathcal X}^2$ and $R=L_{\mathcal X}^2/4$, respectively.
+Using $R=1$ or $R=1/4$ without a unit-radius condition is instead a
+family-reference calibration: the temperature remains well-defined,
+but these values need not bound the information increments, so the
+range-bound interpretation is not asserted for that implementation.
+The uniform constant $B=\overline wL^2$ in the theoretical proofs
+is unchanged.
+
+The floor $10^{-8}$ is applied to the terminal reference temperature
+only. No additional clipping of each $\tau_t$ is part of
+\eqref{eq:range-anchored-schedule}. If the floor is active, the
+schedule is still defined by \eqref{eq:temperature}, but
+Proposition~\ref{prop:range-coefficient} is not invoked.
+For $d=1$, $P_\tau(W)=1$ for every positive temperature, so the
+spectral acquisition rule is temperature-independent and no
+$\log d$-based calibration is needed. When a warm start is used,
+$mt$ and $N_{\max}$ count adaptive responses after that warm start;
+the warm-start information remains in the initial state.
+
+\subsubsection{Relation to the fixed-coefficient asymptotic analysis}
+
+Theorem~\ref{thm:information} analyzes a power-law schedule with a
+fixed coefficient $\tau_0>0$. For each fixed choice of
+$m$, $R$, and $N_{\max}$, \eqref{eq:temperature} supplies such a
+coefficient. If this coefficient is retained and the same power law
+is continued, the existing results apply under their original
+full-ball, estimator, and response assumptions. The temperature
+cap above applies only up to the prescribed calibration budget;
+continuation does not clip the temperature at $\tau_{\mathrm{range}}$.
+
+By contrast, increasing $N_{\max}$ and recalibrating $\tau_0$ for
+every new run defines a family of different policies. The existing
+bounds depend on $\tau_0$, including through $1/\tau_0$, and do
+not by themselves establish uniform asymptotic optimality for that
+horizon-dependent family. Likewise, recalibration across batch sizes
+does not preserve a claim of constants uniform in $m$ without
+tracking this dependence. The local calibration result does not
+extend the full-ball guarantees to finite-pool sampling without
+replacement or to misspecified response models.
+
+\end{document}

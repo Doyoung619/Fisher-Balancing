@@ -1,0 +1,46 @@
+{
+  "accessed_date": "2026-10-05",
+  "access_scope": "Historical bibliography from the original experiment. Executable protocol: OFAT_SPEC.json, exclusion amendment and src/common.py resolver.",
+  "references": [
+    {
+      "id": "R1",
+      "title": "The adaptive Wynn-algorithm in generalized linear models with univariate response",
+      "authors": "Freise, Gaffke, Schwabe",
+      "publication": "2019 preprint; Annals of Statistics 2021",
+      "url": "https://arxiv.org/abs/1907.02708",
+      "implementation_relation": "Adaptive Wynn connection; batched ridge implementation is specified by this protocol."
+    },
+    {
+      "id": "R2",
+      "title": "Near-Optimal Design of Experiments via Regret Minimization",
+      "authors": "Allen-Zhu, Li, Singh, Wang",
+      "publication": "ICML 2017",
+      "url": "https://proceedings.mlr.press/v70/allen-zhu17e.html",
+      "implementation_relation": "Motivation for relaxation and rounding; continuous support-generation implementation is not the paper finite-subset algorithm."
+    },
+    {
+      "id": "R3",
+      "title": "Improved Algorithms for Linear Stochastic Bandits",
+      "authors": "Abbasi-Yadkori, Pal, Szepesvari",
+      "publication": "NeurIPS 2011",
+      "url": "https://proceedings.neurips.cc/paper_files/paper/2011/hash/e1d5be1c7f2f456670de3d53c7b54f4a-Abstract.html",
+      "implementation_relation": "Ellipsoidal confidence and UCB background; no transfer of regret theorem claimed."
+    },
+    {
+      "id": "R4",
+      "title": "Parametric Bandits: The Generalized Linear Case",
+      "authors": "Filippi, Cappe, Garivier, Szepesvari",
+      "publication": "NeurIPS 2010",
+      "url": "https://proceedings.neurips.cc/paper/2010/hash/c2626d850c80ea07e7511bbae4c76f4b-Abstract.html",
+      "implementation_relation": "GLM optimistic control background; implemented latent-predictor ellipsoid is not original GLM-UCB."
+    },
+    {
+      "id": "R5",
+      "title": "An Empirical Evaluation of Thompson Sampling",
+      "authors": "Chapelle, Li",
+      "publication": "NeurIPS 2011",
+      "url": "https://papers.nips.cc/paper/2011/hash/e53a0a2978c28872a4505bdb51db06dc-Abstract.html",
+      "implementation_relation": "TS background; implemented Gaussian/Laplace perturbations with active constraints are not a truncated posterior."
+    }
+  ]
+}

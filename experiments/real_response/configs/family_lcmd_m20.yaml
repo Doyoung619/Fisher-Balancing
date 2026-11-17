@@ -1,0 +1,160 @@
+protocol_name: fisherbalancing_real_response_v2
+schema_version: 2
+preprocess_seed: 20261004
+dimensions:
+- 5
+- 10
+- 20
+run_seeds:
+- 0
+- 1
+- 2
+- 3
+- 4
+- 5
+- 6
+- 7
+- 8
+- 9
+n0: 80
+rho: 1.0
+fitting_objective: sum_nll_plus_fixed_ridge
+penalize_intercept: true
+intercept_in_dimension: true
+feature_mode: nested_pca_unwhitened
+feature_components: 19
+feature_fit_scope: pool_only
+feature_scale_scope: maximum_supported_dimension_pool_only
+initialization_dimension: 20
+reference_scope: fixed_pool_all_labels
+reference_shared_across_seeds: true
+reference_per_dimension: true
+matched_regularization_reference: every_checkpoint
+learner_max_iter: 50
+learner_grad_relative_tolerance: 1.0e-08
+reference_max_iter: 200
+reference_grad_relative_tolerance: 1.0e-09
+bait_normalization: matched_sum_information
+candidate_rule: shared_hash_priority
+methods:
+- lcmd
+method_family_policy:
+  badge:
+  - bernoulli
+datasets:
+  movielens:
+    source: movielens_100k
+    split: chronological_80_20_then_hash_subsample
+    pool_cap: 10000
+    test_cap: 5000
+    response_transform: subtract_fixed_3
+    additional_labels: 400
+    batch_size: 20
+    candidate_cap: 256
+metrics:
+  checkpoint: warm_and_every_completed_batch
+  save_theta_vectors: true
+  save_signed_error_vectors: true
+  save_full_information_matrices:
+  - V_ref
+  - V_hat
+  - V_acq
+  - H_design
+  save_full_spectra: true
+  reference_and_plugin_lambda_min: required
+  information_tracking_operator_norm: required
+  mean_l2: required
+  uncentered_Q: required
+  R2_and_R2_squared: required
+  Rdir_and_Rdir_squared: required
+  risk_seed_count: 10
+  covariance_centering_for_Q: false
+  Q_regularization: 0.0
+  save_bias_centered_covariance_separately: true
+  matched_reference_metrics: required
+  fit_loss_audit: required
+  full_pool_objective_gaps: required
+  predictive_test_metrics: required
+  batch_candidate_and_selection_audit: required
+  theoretical_truth_values: not_identified_in_real_data
+uncertainty:
+  per_run_scalar_mean_interval: descriptive_student_t
+  nonlinear_risk_interval: descriptive_whole_seed_bootstrap
+  bootstrap_draws: 1000
+  bootstrap_scope: endpoint
+  paired_seed_resampling: true
+  leave_one_seed_out_risk: all_checkpoints
+sdp:
+  primary_solver: SCS
+  benchmark_available_solvers: true
+  max_iters: 5000
+  eps_abs: 0.0001
+  eps_rel: 0.0001
+  same_external_quality_gate: true
+  dependent_rounding_draws: 8
+  swap_max_proposals: 128
+  swap_max_passes: 1
+  record_dual_upper_bound: true
+  feasibility_tolerance: 0.0005
+  objective_gap_tolerance: 0.002
+runtime:
+  goal: fastest_validated_end_to_end
+  backend: auto_measured_cpu_or_cuda_or_hybrid
+  allowed_gpu_ids:
+  - 0
+  - 1
+  - 2
+  - 3
+  allow_cpu_only_when_faster: true
+  dtype: float64
+  cpu_workers: auto_measured
+  cpu_worker_candidates:
+  - 16
+  - 24
+  - 32
+  - 48
+  - 64
+  cpu_limit: actual_cpuset_and_cgroup
+  blas_threads_per_worker_initial: 1
+  sdp_queue_separate: true
+  cpu_tokens_shared_across_all_queues: true
+  gpu_worker_processes_per_device_initial: 1
+  gpu_lane_candidates:
+  - 1
+  - 4
+  - 8
+  - 16
+  ram_available_fraction_limit: 0.85
+  os_ram_reserve_gib: 8
+  gpu_memory_fraction_limit: 0.85
+  pilot_max_wall_minutes: 10
+  tuning_policy: bounded_successive_halving
+  scheduler: work_conserving_cost_aware
+  scientific_rng_independent_of_device: true
+  preview_seeds:
+  - 0
+  - 1
+  - 2
+  - 3
+  - 4
+  preview_is_global_barrier: false
+  mandatory_postprocessing_before_main_complete: true
+  telemetry_interval_seconds: 10
+  max_download_mb: 100
+  resume: true
+e_backend_by_dimension:
+  5: batched
+  10: secular
+  20: secular
+profile: lcmd_m20
+bemcm_Z: 4
+bemcm_alpha: 0.05
+firal_eta_candidates:
+- 2.0
+- 20.0
+- 200.0
+- 2000.0
+- 20000.0
+firal_relative_gap: 1.0e-07
+firal_relax_max_iter: 2000
+family_method_version: family_baselines_v1
